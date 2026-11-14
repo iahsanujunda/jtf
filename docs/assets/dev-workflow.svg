@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" font-family="Helvetica, Arial, sans-serif" fill="#1F2937">
+  <defs>
+    <marker id="end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="640" fill="#FFFFFF"/>
+
+  <!-- Title -->
+  <text x="20" y="40" font-size="20" font-weight="700">Development and release workflow</text>
+  <text x="20" y="62" font-size="12.5" fill="#6B7280">Each merge builds one image, and the same digest moves from dev to prod. Permissions enforce the path: a laptop can only write to dev.</text>
+
+  <!-- Stage panels -->
+  <g stroke-width="1.5">
+    <rect x="20" y="90" width="272" height="370" rx="14" fill="#F3F7FC" stroke="#9DB4D3"/>
+    <rect x="342" y="90" width="272" height="370" rx="14" fill="#F3F7FC" stroke="#9DB4D3"/>
+    <rect x="664" y="90" width="272" height="370" rx="14" fill="#F3F7FC" stroke="#9DB4D3"/>
+    <rect x="986" y="90" width="272" height="370" rx="14" fill="#FDF6EC" stroke="#D9B77E"/>
+  </g>
+
+  <!-- Stage headers -->
+  <text x="36" y="118" font-size="16" font-weight="700">1. Laptop</text>
+  <text x="36" y="138" font-size="12">dev project</text>
+  <text x="36" y="155" font-size="12" fill="#6B7280">reads prod, writes dev only</text>
+
+  <text x="358" y="118" font-size="16" font-weight="700">2. Pull request</text>
+  <text x="358" y="138" font-size="12">CI in the dev project</text>
+  <text x="358" y="155" font-size="12" fill="#6B7280">a throwaway dataset per PR</text>
+
+  <text x="680" y="118" font-size="16" font-weight="700">3. Merge to main</text>
+  <text x="680" y="138" font-size="12">CI with the prod service account</text>
+  <text x="680" y="155" font-size="12" fill="#6B7280">the only identity that writes prod</text>
+
+  <text x="1002" y="118" font-size="16" font-weight="700">4. Prod</text>
+  <text x="1002" y="138" font-size="12">scheduled runs only</text>
+  <text x="1002" y="155" font-size="12" fill="#6B7280">nobody changes it by hand</text>
+
+  <!-- Step boxes -->
+  <g stroke="#4B6A91" stroke-width="1.5" fill="#FFFFFF">
+    <rect x="36" y="172" width="240" height="54" rx="8"/>
+    <rect x="36" y="244" width="240" height="54" rx="8"/>
+    <rect x="36" y="316" width="240" height="54" rx="8"/>
+    <rect x="36" y="388" width="240" height="54" rx="8"/>
+
+    <rect x="358" y="172" width="240" height="54" rx="8"/>
+    <rect x="358" y="244" width="240" height="54" rx="8"/>
+    <rect x="358" y="316" width="240" height="54" rx="8"/>
+    <rect x="358" y="388" width="240" height="54" rx="8"/>
+
+    <rect x="680" y="172" width="240" height="54" rx="8"/>
+    <rect x="680" y="244" width="240" height="54" rx="8"/>
+    <rect x="680" y="316" width="240" height="54" rx="8"/>
+    <rect x="680" y="388" width="240" height="54" rx="8"/>
+  </g>
+  <g stroke="#B7791F" stroke-width="1.5" fill="#FFFFFF">
+    <rect x="1002" y="172" width="240" height="54" rx="8"/>
+    <rect x="1002" y="244" width="240" height="54" rx="8"/>
+    <rect x="1002" y="316" width="240" height="54" rx="8"/>
+  </g>
+  <rect x="1002" y="388" width="240" height="54" rx="8" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="1.5" stroke-dasharray="6 4"/>
+
+  <!-- Step text -->
+  <g text-anchor="middle">
+    <text x="156" y="195" font-size="13.5" font-weight="700">Edit code or SQL</text>
+    <text x="156" y="213" font-size="12" fill="#6B7280">Python, Dagster, dbt, React</text>
+    <text x="156" y="267" font-size="13.5" font-weight="700">Unit tests</text>
+    <text x="156" y="285" font-size="12" fill="#6B7280">offline, with file:// storage</text>
+    <text x="156" y="339" font-size="13.5" font-weight="700">Run in dagster dev</text>
+    <text x="156" y="357" font-size="12" fill="#6B7280">against your own dev dataset</text>
+    <text x="156" y="411" font-size="13.5" font-weight="700">Compare with prod</text>
+    <text x="156" y="429" font-size="12" fill="#6B7280">data diff, backtest in MLflow dev/</text>
+
+    <text x="478" y="195" font-size="13.5" font-weight="700">Static checks</text>
+    <text x="478" y="213" font-size="12" fill="#6B7280">lint, types, as-of SQL rules</text>
+    <text x="478" y="267" font-size="13.5" font-weight="700">dbt build and tests</text>
+    <text x="478" y="285" font-size="12" fill="#6B7280">in the PR's own dataset</text>
+    <text x="478" y="339" font-size="13.5" font-weight="700">Report on the PR</text>
+    <text x="478" y="357" font-size="12" fill="#6B7280">data diff, backtest vs production</text>
+    <text x="478" y="411" font-size="13.5" font-weight="700">terraform plan</text>
+    <text x="478" y="429" font-size="12" fill="#6B7280">for dev and prod</text>
+
+    <text x="800" y="195" font-size="13.5" font-weight="700">Build the image once</text>
+    <text x="800" y="213" font-size="12" fill="#6B7280">push to Artifact Registry</text>
+    <text x="800" y="267" font-size="13.5" font-weight="700">Deploy to dev</text>
+    <text x="800" y="285" font-size="12" fill="#6B7280">jobs pinned to the new digest</text>
+    <text x="800" y="339" font-size="13.5" font-weight="700">Smoke test in dev</text>
+    <text x="800" y="357" font-size="12" fill="#6B7280">replay yesterday, check output</text>
+    <text x="800" y="411" font-size="13.5" font-weight="700">Wait for approval</text>
+    <text x="800" y="429" font-size="12" fill="#6B7280">GitHub prod environment</text>
+
+    <text x="1122" y="195" font-size="13.5" font-weight="700">Deploy to prod</text>
+    <text x="1122" y="213" font-size="12" fill="#6B7280">same digest, terraform apply</text>
+    <text x="1122" y="267" font-size="13.5" font-weight="700">Backfill in Dagster</text>
+    <text x="1122" y="285" font-size="12" fill="#6B7280">out-of-date partitions, one run</text>
+    <text x="1122" y="339" font-size="13.5" font-weight="700">Next scheduled run</text>
+    <text x="1122" y="357" font-size="12" fill="#6B7280">uses the new digest</text>
+    <text x="1122" y="411" font-size="13.5" font-weight="700">Rollback, if needed</text>
+    <text x="1122" y="429" font-size="12" fill="#6B7280">promote the previous digest</text>
+  </g>
+
+  <!-- Arrows inside stages -->
+  <g stroke="#374151" stroke-width="1.5" marker-end="url(#end)">
+    <line x1="156" y1="227" x2="156" y2="242"/>
+    <line x1="156" y1="299" x2="156" y2="314"/>
+    <line x1="156" y1="371" x2="156" y2="386"/>
+    <line x1="478" y1="227" x2="478" y2="242"/>
+    <line x1="478" y1="299" x2="478" y2="314"/>
+    <line x1="478" y1="371" x2="478" y2="386"/>
+    <line x1="800" y1="227" x2="800" y2="242"/>
+    <line x1="800" y1="299" x2="800" y2="314"/>
+    <line x1="800" y1="371" x2="800" y2="386"/>
+    <line x1="1122" y1="227" x2="1122" y2="242"/>
+    <line x1="1122" y1="299" x2="1122" y2="314"/>
+  </g>
+
+  <!-- Arrows between stages -->
+  <g stroke="#374151" stroke-width="1.5" marker-end="url(#end)">
+    <line x1="294" y1="280" x2="340" y2="280"/>
+    <line x1="616" y1="280" x2="662" y2="280"/>
+    <line x1="938" y1="280" x2="984" y2="280"/>
+  </g>
+  <g font-size="11" fill="#6B7280" text-anchor="middle">
+    <text x="317" y="272">open PR</text>
+    <text x="639" y="272">merge</text>
+    <text x="961" y="272">approve</text>
+  </g>
+
+  <!-- Backfills and replays -->
+  <text x="20" y="500" font-size="15" font-weight="700">Backfills and replays</text>
+  <text x="20" y="518" font-size="12" fill="#6B7280">The same assets as the daily run. Rehearsed in dagster dev, launched in prod from the Dagster UI, never from a laptop script.</text>
+  <g stroke="#4B6A91" stroke-width="1.5" fill="#FFFFFF">
+    <rect x="20" y="532" width="290" height="80" rx="8"/>
+    <rect x="336" y="532" width="290" height="80" rx="8"/>
+    <rect x="652" y="532" width="290" height="80" rx="8"/>
+  </g>
+  <rect x="968" y="532" width="290" height="80" rx="8" fill="#FFFFFF" stroke="#B7791F" stroke-width="1.5"/>
+  <g text-anchor="middle">
+    <text x="165" y="556" font-size="13.5" font-weight="700">Rehearse in dev</text>
+    <text x="165" y="576" font-size="12">dagster dev, your own dataset</text>
+    <text x="165" y="594" font-size="12" fill="#6B7280">diff the result before trusting it</text>
+    <text x="481" y="556" font-size="13.5" font-weight="700">Launch in the prod UI</text>
+    <text x="481" y="576" font-size="12">pick the partitions or the job</text>
+    <text x="481" y="594" font-size="12" fill="#6B7280">reached only through IAP</text>
+    <text x="797" y="556" font-size="13.5" font-weight="700">One run per range</text>
+    <text x="797" y="576" font-size="12">single-run backfill policy</text>
+    <text x="797" y="594" font-size="12" fill="#6B7280">safe to re-run</text>
+    <text x="1113" y="556" font-size="13.5" font-weight="700">Append-only results</text>
+    <text x="1113" y="576" font-size="12">new ODS batch, rebuilt tables, replays</text>
+    <text x="1113" y="594" font-size="12" fill="#6B7280">published forecasts never overwritten</text>
+  </g>
+  <g stroke="#374151" stroke-width="1.5" marker-end="url(#end)">
+    <line x1="312" y1="572" x2="334" y2="572"/>
+    <line x1="628" y1="572" x2="650" y2="572"/>
+    <line x1="944" y1="572" x2="966" y2="572"/>
+  </g>
+</svg>

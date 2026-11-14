@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="540" viewBox="0 0 1280 540" font-family="Helvetica, Arial, sans-serif" fill="#1F2937">
+  <defs>
+    <marker id="end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+    <marker id="end-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6B7280"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="540" fill="#FFFFFF"/>
+
+  <!-- Title -->
+  <text x="20" y="40" font-size="20" font-weight="700">Feature and model release</text>
+  <text x="20" y="62" font-size="12.5" fill="#6B7280">A new model usually needs new features, so it ships as two releases in order: first the features, backfilled over the whole history, then the model trained on them.</text>
+
+  <!-- Track 1: feature release -->
+  <text x="20" y="100" font-size="15" font-weight="700">1. Feature release</text>
+  <text x="188" y="100" font-size="12" fill="#6B7280">the normal code path, with a backfill after deploy</text>
+
+  <g stroke="#4B6A91" stroke-width="1.5" fill="#FFFFFF">
+    <rect x="20" y="115" width="190" height="84" rx="8"/>
+    <rect x="228" y="115" width="190" height="84" rx="8"/>
+    <rect x="644" y="115" width="190" height="84" rx="8"/>
+    <rect x="852" y="115" width="190" height="84" rx="8"/>
+  </g>
+  <rect x="436" y="115" width="190" height="84" rx="8" fill="#FDF6EC" stroke="#B7791F" stroke-width="1.5"/>
+
+  <g text-anchor="middle">
+    <text x="115" y="141" font-size="14" font-weight="700">Experiment in dev</text>
+    <text x="115" y="163" font-size="12">feature and model together</text>
+    <text x="115" y="181" font-size="12" fill="#6B7280">backtest under MLflow dev/</text>
+
+    <text x="323" y="141" font-size="14" font-weight="700">Feature PR</text>
+    <text x="323" y="163" font-size="12">adds new feature columns</text>
+    <text x="323" y="181" font-size="12" fill="#6B7280">existing columns unchanged</text>
+
+    <text x="531" y="141" font-size="14" font-weight="700">Release + backfill</text>
+    <text x="531" y="163" font-size="12">re-parse if needed, then</text>
+    <text x="531" y="181" font-size="12" fill="#6B7280">rebuild DWS for all history</text>
+
+    <text x="739" y="141" font-size="14" font-weight="700">Verify in prod</text>
+    <text x="739" y="163" font-size="12">checks on the full history</text>
+    <text x="739" y="181" font-size="12" fill="#6B7280">diff against the dev results</text>
+
+    <text x="947" y="141" font-size="14" font-weight="700">Feature live</text>
+    <text x="947" y="163" font-size="12">production model ignores it</text>
+    <text x="947" y="181" font-size="12" fill="#6B7280">until a model uses it</text>
+  </g>
+
+  <g stroke="#374151" stroke-width="1.5" marker-end="url(#end)">
+    <line x1="212" y1="157" x2="226" y2="157"/>
+    <line x1="420" y1="157" x2="434" y2="157"/>
+    <line x1="628" y1="157" x2="642" y2="157"/>
+    <line x1="836" y1="157" x2="850" y2="157"/>
+  </g>
+
+  <!-- Hand-off to the model track -->
+  <path d="M947,201 V230 H200 V286" stroke="#374151" stroke-width="1.5" fill="none" marker-end="url(#end)"/>
+  <text x="574" y="224" font-size="11.5" fill="#6B7280" text-anchor="middle">once the features exist over the full history in prod</text>
+
+  <!-- Track 2: model release -->
+  <text x="20" y="270" font-size="15" font-weight="700">2. Model release</text>
+
+  <g stroke="#4B6A91" stroke-width="1.5" fill="#FFFFFF">
+    <rect x="20" y="288" width="190" height="84" rx="8"/>
+    <rect x="436" y="288" width="190" height="84" rx="8"/>
+    <rect x="644" y="288" width="190" height="84" rx="8"/>
+    <rect x="852" y="288" width="190" height="84" rx="8"/>
+  </g>
+  <rect x="228" y="288" width="190" height="84" rx="8" fill="#FFF8E6" stroke="#C9A23F" stroke-width="1.5"/>
+  <rect x="1060" y="288" width="190" height="84" rx="8" fill="#FDF6EC" stroke="#B7791F" stroke-width="1.5"/>
+
+  <g text-anchor="middle">
+    <text x="115" y="314" font-size="14" font-weight="700">Retrain</text>
+    <text x="115" y="336" font-size="12">on the new feature set</text>
+    <text x="115" y="354" font-size="12" fill="#6B7280">as-of features, in prod</text>
+
+    <text x="323" y="314" font-size="14" font-weight="700">Backtest gate</text>
+    <text x="323" y="336" font-size="12">beats prod on pinball loss</text>
+    <text x="323" y="354" font-size="12" fill="#6B7280">no segment clearly worse</text>
+
+    <text x="531" y="314" font-size="14" font-weight="700">Register challenger</text>
+    <text x="531" y="336" font-size="12">MLflow alias: challenger</text>
+    <text x="531" y="354" font-size="12" fill="#6B7280">nothing serves it yet</text>
+
+    <text x="739" y="314" font-size="14" font-weight="700">Shadow run</text>
+    <text x="739" y="336" font-size="12">next to production, N days</text>
+    <text x="739" y="354" font-size="12" fill="#6B7280">writes the shadow table only</text>
+
+    <text x="947" y="314" font-size="14" font-weight="700">Promotion PR</text>
+    <text x="947" y="336" font-size="12">one line in models.yaml</text>
+    <text x="947" y="354" font-size="12" fill="#6B7280">shadow results attached</text>
+
+    <text x="1155" y="314" font-size="14" font-weight="700">CI releases</text>
+    <text x="1155" y="336" font-size="12">sets the production alias</text>
+    <text x="1155" y="354" font-size="12" fill="#6B7280">writes the pointer file</text>
+  </g>
+
+  <g stroke="#374151" stroke-width="1.5" marker-end="url(#end)">
+    <line x1="212" y1="330" x2="226" y2="330"/>
+    <line x1="420" y1="330" x2="434" y2="330"/>
+    <line x1="628" y1="330" x2="642" y2="330"/>
+    <line x1="836" y1="330" x2="850" y2="330"/>
+    <line x1="1044" y1="330" x2="1058" y2="330"/>
+  </g>
+
+  <!-- Gate failure -->
+  <line x1="323" y1="374" x2="323" y2="414" stroke="#6B7280" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#end-muted)"/>
+  <text x="331" y="398" font-size="11" fill="#6B7280">fail</text>
+  <rect x="228" y="416" width="190" height="58" rx="8" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="323" y="440" font-size="13.5" font-weight="700" text-anchor="middle">Stays a candidate</text>
+  <text x="323" y="459" font-size="12" fill="#6B7280" text-anchor="middle">features stay, harmlessly</text>
+
+  <!-- Rollback -->
+  <line x1="1155" y1="374" x2="1155" y2="414" stroke="#6B7280" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#end-muted)"/>
+  <text x="1163" y="398" font-size="11" fill="#6B7280">if needed</text>
+  <rect x="1060" y="416" width="190" height="58" rx="8" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="1155" y="440" font-size="13.5" font-weight="700" text-anchor="middle">Rollback</text>
+  <text x="1155" y="459" font-size="12" fill="#6B7280" text-anchor="middle">revert the PR, data untouched</text>
+
+  <!-- Control point -->
+  <text x="436" y="440" font-size="12.5" font-weight="700">The control point is the pointer file.</text>
+  <text x="436" y="459" font-size="12" fill="#6B7280">Daily predict reads only the pointer file in Cloud Storage, and only CI can write it,</text>
+  <text x="436" y="476" font-size="12" fill="#6B7280">so nothing outside this flow can change the model that production uses.</text>
+
+  <!-- Cleanup -->
+  <text x="20" y="516" font-size="15" font-weight="700">3. Cleanup, later</text>
+  <text x="178" y="516" font-size="12" fill="#6B7280">a normal PR drops old feature columns once no production model uses them.</text>
+</svg>

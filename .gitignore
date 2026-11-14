@@ -1,0 +1,96 @@
+# --- Private: CV, job description and recruiting material ---
+iahsanujunda/
+
+# --- Secrets and credentials (never commit) ---
+.env
+.env.*
+!.env.example
+!**/settings.example.env
+*.pem
+*.key
+*.p12
+# Service account keys and ADC files (we use Workload Identity Federation; keys should not exist)
+*-sa.json
+*-key.json
+credentials*.json
+application_default_credentials.json
+# Written into the workspace by google-github-actions/auth
+gha-creds-*.json
+
+# --- Python / uv (uv.lock is committed) ---
+__pycache__/
+*.py[cod]
+.venv/
+.python-version.local
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# --- dbt ---
+warehouse/dbt/target/
+warehouse/dbt/dbt_packages/
+warehouse/dbt/logs/
+.user.yml
+
+# --- MLflow, local runs (the hosted server is the record) ---
+mlruns/
+mlartifacts/
+mlflow.db
+
+# --- Local data and outputs (raw files live in Cloud Storage, not git) ---
+/data/
+/artifacts/
+/models/
+/scratch/
+
+# --- Terraform (.terraform.lock.hcl is committed) ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# --- React dashboard ---
+node_modules/
+dashboard/dist/
+dashboard/coverage/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Editors and OS ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# --- Claude Code, personal settings ---
+.claude/settings.local.json
+CLAUDE.local.md
+
+# --- Logs ---
+*.log
