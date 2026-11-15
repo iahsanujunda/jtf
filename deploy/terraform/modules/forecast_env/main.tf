@@ -38,6 +38,14 @@ resource "google_storage_bucket_iam_member" "fetch_creates_raw" {
   member = "serviceAccount:${google_service_account.fetch.email}"
 }
 
+# Reading and listing let history loads resume and re-captures find the last Last-Modified.
+# Neither role can delete or overwrite, so raw files stay create-only.
+resource "google_storage_bucket_iam_member" "fetch_reads_raw" {
+  bucket = google_storage_bucket.raw.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.fetch.email}"
+}
+
 # The healthchecks.io project ping key; each job pings its own slug with it.
 # Container only: the value is added with `gcloud secrets versions add`, so it never
 # appears in git or in Terraform state.

@@ -133,7 +133,7 @@ Each change below came out of [the history probe](../../notebooks/01_history_pro
 **Fetch** (`jtf fetch --source S [--initial]`, in the capture jobs only) downloads a file and writes it unchanged through `storage`:
 
 - Path: `raw/{source}/{extraction_date_jst}/{fetched_at}_{filename}`, plus `{…}.meta.json` with fetch time, URL, request parameters, response headers and any update time found inside the file (`source_time`)
-- Create-only: `if_generation_match=0` in code, and the job's service account has only `roles/storage.objectCreator`, which cannot delete or overwrite. An existing file cannot be replaced even by a bug
+- Create-only: `if_generation_match=0` in code, and the job's service account has only `roles/storage.objectCreator` and `roles/storage.objectViewer` (to list and read, for resumable loads and re-captures); neither can delete or overwrite. An existing file cannot be replaced even by a bug
 - No parsing in the fetch step
 
 **Parse** runs as Dagster ODS assets (also `jtf parse --source S --from D1 --to D2`) that read raw files and load ODS tables in BigQuery:
@@ -223,7 +223,7 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 
 | Where | What | Terraform |
 | --- | --- | --- |
-| Prod project, Tokyo: capture slice (step 1) | Raw bucket (uniform access, soft delete on); Artifact Registry repository; service account `jtf-fetch` with `roles/storage.objectCreator` on the raw bucket only; one Cloud Run job per source (`jtf-fetch-<source>`) pinned to an image digest; one Cloud Scheduler trigger per source and a `jtf-scheduler` service account allowed to run them; a Secret Manager entry for the healthchecks.io ping key | `envs/prod`, `forecast_env` module |
+| Prod project, Tokyo: capture slice (step 1) | Raw bucket (uniform access, soft delete on); Artifact Registry repository; service account `jtf-fetch` with `roles/storage.objectCreator` and `roles/storage.objectViewer` on the raw bucket only; one Cloud Run job per source (`jtf-fetch-<source>`) pinned to an image digest; one Cloud Scheduler trigger per source and a `jtf-scheduler` service account allowed to run them; a Secret Manager entry for the healthchecks.io ping key | `envs/prod`, `forecast_env` module |
 | Prod project, Tokyo: Dagster (step 4) | `e2-medium` VM with no public IP and a 30 GB disk; Cloud NAT; firewall rule allowing only IAP's range; Cloud SQL Postgres `db-f1-micro`, Enterprise edition, no HA, database `dagster`; service account for the VM with BigQuery and read access to the raw bucket | `envs/prod`, `platform` module |
 | Dev project, Tokyo | Dev raw bucket for fetch tests; BigQuery datasets `ods`, `dwd`, `dws`, `ads` with per-developer and per-PR prefixes; read access to the prod raw bucket | `envs/dev` |
 | Both, via `deploy/bootstrap` | APIs; Terraform state bucket; Workload Identity Federation for GitHub (PRs reach dev; only `main` with the `prod` environment's approval reaches prod); CI service accounts; the budget on the dedicated billing account (¥12,000 a month, alerts at 75%, 100% and on forecast) | `bootstrap` |
