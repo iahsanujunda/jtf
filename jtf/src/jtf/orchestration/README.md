@@ -5,7 +5,7 @@ Dagster definitions. Assets are thin wrappers over `jtf` functions: no logic liv
 | Piece | Phase |
 | --- | --- |
 | External `raw` assets, one per source, and the raw-bucket sensor that records each landed file | 1 |
-| Freshness checks per capture group (morning by 09:00, `jepx` by 11:30, evening by 22:30) | 1 |
+| Freshness checks per capture source (08:45 sources by 09:00, `jepx-spot` by 11:30, next-day sources by 22:30) | 1 |
 | Partitions: extraction day for raw and ODS; decision date from 2024-02-01 for DWS and predictions | 1 |
 | ODS assets with declarative automation on new raw records | 1 |
 | dbt assets through `dagster-dbt`; dbt tests as asset checks; single-run backfill policy for DWS | 1 |

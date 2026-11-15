@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+project_id = "my-forecast-prod"
+region     = "asia-northeast1"
+image      = "asia-northeast1-docker.pkg.dev/my-forecast-prod/jtf/jtf@sha256:<digest>"

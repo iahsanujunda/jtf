@@ -70,14 +70,14 @@ Three free public sources (JEPX, TEPCO Power Grid and Open-Meteo) cover everythi
 
 | When (JST) | What | Why |
 | --- | --- | --- |
-| 08:45 daily, just before the decision time | Current month's `eria_jukyu` (and the previous month during the first days of a month); `AREA_YOSOKU`, `AREA_BGKEI`, `AREA_JISEKI`, `juyo-d1-j.csv`; the latest Open-Meteo JMA MSM and GSM runs for the Kanto points | Exactly what was known at decision time, and real weather availability times. It runs before `T` so its `known_at` qualifies |
-| 19:00 and 22:00 daily | `AREA_ONCE_YOSOKU`, `AREA_ONCE_BGKEI` | The only copy of TEPCO's next-day forecast; two captures until its publication time is known. One cron entry (`0 19,22 * * *`) keeps the schedules within Cloud Scheduler's three free jobs |
+| 08:45 daily, just before the decision time | Current month's `eria_jukyu` (and the previous month during the first days of a month); `AREA_YOSOKU`, `AREA_BGKEI`, `AREA_JISEKI`, `juyo-d1-j.csv`; the latest Open-Meteo runs (JMA MSM and GSM, ECMWF IFS 0.25°) for the Kanto points | Exactly what was known at decision time, and real weather availability times. It runs before `T` so its `known_at` qualifies |
+| 19:00 and 22:00 daily | `AREA_ONCE_YOSOKU`, `AREA_ONCE_BGKEI` | The only copy of TEPCO's next-day forecast; two captures until its publication time is known |
 | 11:00 daily | JEPX spot summary for the current fiscal year | The day's auction result. Backfillable, but a daily capture records when it appeared |
 | Once, then monthly | History: TEPCO actuals from FY2016, JEPX past fiscal years, Open-Meteo Previous Runs and Single Runs | The initial load, tagged `initial` |
 
 A value is known from the first capture that contains it. Between captures `known_at` errs late, never early.
 
-The capture job runs on Cloud Scheduler, outside Dagster, so a Dagster outage can never lose source data. It is the only part of the system that contacts the sources; Dagster sees each landed file through a sensor.
+Capture is organised by source: one source file is one capture job (`jtf-fetch-<source>`), one schedule, one retry policy, one health check, one raw prefix, one Dagster raw asset and, later, one ODS table. A slow or failing source never affects another. The capture jobs run on Cloud Scheduler, outside Dagster, so a Dagster outage can never lose source data. They are the only part of the system that contacts the sources; Dagster sees each landed file through a sensor. The full list of sources and schedules is in the [phase 1 plan](phase1/README.md#capture-schedule).
 
 **Before and after capture start:** history fetched in the initial load shows each source's current view of the past. From capture start, every version is recorded as it arrives.
 
@@ -171,7 +171,7 @@ The line is drawn by what a failure costs. Capture runs as a Cloud Run Job on Cl
 
 | Need | Dagster feature |
 | --- | --- |
-| See every capture | Raw files are external assets: the capture job writes them, and a sensor on the raw bucket records each landed file against its source and day. Freshness checks per capture group fail when a capture is missing |
+| See every capture | Raw files are external assets: the capture job writes them, and a sensor on the raw bucket records each landed file against its source and day. Freshness checks per source fail when a capture is missing |
 | Parse when data lands | ODS assets partitioned by extraction day; the sensor's records trigger the parse for that day |
 | SQL layers with lineage | dbt models as assets (`dagster-dbt`); lineage runs from raw files through dbt to predictions and the dashboard |
 | Rebuild downstream automatically | Declarative automation: DWD and DWS rebuild when their inputs update |
@@ -192,7 +192,7 @@ One region, Tokyo (`asia-northeast1`). Cloud SQL sits next to the Dagster VM bec
 | Component | Usage | \~ per month |
 | --- | --- | --- |
 | Capture and fallback jobs (Cloud Run Jobs) | A few minutes a day | $0 (free tier) |
-| Cloud Scheduler | 3 jobs | $0 (3 free) |
+| Cloud Scheduler | 9 triggers, one per capture source | ¥90 ($0.60; 3 free) |
 | Dagster VM: Compute Engine `e2-medium` (2 shared vCPUs, 4 GB), 30 GB disk | Always on: webserver, daemon, code location and runs | $30–35 |
 | Cloud NAT | Outbound internet for the VM, which has no public IP | $1–2 |
 | Cloud SQL Postgres, `db-f1-micro`, Enterprise edition, no HA, 10 GB SSD | Always on: Dagster storage and MLflow metadata | $10–12 |
@@ -297,7 +297,7 @@ The repo is meant to be forked and deployed into someone else's GCP account. The
 2. `make init`: an optional wizard that asks for project IDs (or creates projects), billing account, region, GitHub repo (read from `git remote`) and alert email, and **writes the gitignored `terraform.tfvars` files**. Copying the `*.tfvars.example` files by hand gives the same result
 3. `make bootstrap`, once, with the forker's own gcloud login: enables APIs, creates the state bucket, GitHub access for their repo (WIF), the CI service accounts and the budget, then sets the GitHub repository variables CI needs (or prints them)
 4. Push to `main`: their CI builds their image into their Artifact Registry and applies Terraform, dev first, prod after approval
-5. `make secrets` stores the healthchecks.io ping URLs in Secret Manager; `make initial-load` loads the history; `make ui` opens the Dagster UI through IAP
+5. `make secrets` stores the healthchecks.io ping key in Secret Manager; `make initial-load` loads the history; `make ui` opens the Dagster UI through IAP
 
 A fork deploys the whole pipeline, about ¥7,000–7,500 ($45–50) a month. A lighter option for forks that only want the data capture can come later, if anyone asks for it.
 
@@ -455,7 +455,7 @@ Drift and accuracy are dbt models, so the replay runner can recompute monitoring
 
 **Dashboard:** a custom React app, built into the same image and served by a Cloud Run service that scales to zero. It never queries BigQuery: after actuals land, the evaluate asset exports the monitoring tables as JSON snapshots to Cloud Storage, one folder per day. That keeps it fast and free, makes a public link safe, and lets the dashboard show any past day exactly as it looked then. Alerts come from checks and Cloud Monitoring, not from the dashboard.
 
-**Outside watchdog:** healthchecks.io, outside GCP. Each capture group pings it on success, and so does the publish step; if the daily forecast has not landed by 09:30, 30 minutes before the gate closure, it alerts. Dagster cannot be trusted to report that Dagster has stopped.
+**Outside watchdog:** healthchecks.io, outside GCP. Each capture source pings its own check, and so does the publish step; if the daily forecast has not landed by 09:30, 30 minutes before the gate closure, it alerts. Dagster cannot be trusted to report that Dagster has stopped.
 
 **Backups**
 

@@ -7,7 +7,7 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 ## Done when
 
 1. The capture job runs daily in prod on schedule, and every missed capture raises an alert
-2. Dagster runs locally and in prod. The prod UI shows every capture group's files per day with freshness checks, and the parse and dbt chain runs on its own when new captures land
+2. Dagster runs locally and in prod. The prod UI shows every source's files per day with freshness checks, and the parse and dbt chain runs on its own when new captures land
 3. The initial history is loaded, and all phase-1 sources are parsed into ODS, DWD and DWS
 4. The time machine passes its determinism and future-poison tests in CI, and a reproduce replay of an earlier what-if run matches it exactly
 5. M1 beats persistence (skill above 0) in the rolling backtest on daylight slots, with P10–P90 coverage reported; it is compared with TEPCO's forecast over whatever capture period exists, stated as such
@@ -25,9 +25,9 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 
 | # | Step | Deliverables | Done check |
 | --- | --- | --- | --- |
-| 1 | **Capture, this week** | Repo skeleton (uv, `jtf` CLI, Dockerfile, Makefile, `ci.yml`); `deploy/bootstrap` (APIs, state bucket, WIF, CI service accounts, budget, importing the hand-made budget) behind `make bootstrap`; every account-specific value as a Terraform variable, with `terraform.tfvars.example` files; `storage` module; `jtf fetch` for every capture group; Terraform for the prod capture slice; `release.yml` that builds the image and points the job at its digest; healthchecks.io checks | Three scheduled runs land files and sidecars in the prod raw bucket; a skipped run alerts |
+| 1 | **Capture, this week** | Repo skeleton (uv, `jtf` CLI, Dockerfile, Makefile, `ci.yml`); `deploy/bootstrap` (APIs, state bucket, WIF, CI service accounts, budget, importing the hand-made budget) behind `make bootstrap`; every account-specific value as a Terraform variable, with `terraform.tfvars.example` files; `storage` module; `jtf fetch` for every source; Terraform for the prod capture slice, one job and schedule per source; `release.yml` that builds the image and points the jobs at its digest; one healthchecks.io check per source | Every source's scheduled run lands files and sidecars in the prod raw bucket; a skipped or failed run alerts on that source's check |
 | 2 | Initial history load | `jtf fetch --initial` per source, as one-off executions of the capture job, tagged `initial` | Raw files for every range in [Initial load](#initial-load) |
-| 3 | **Dagster, locally** | `jtf/src/jtf/orchestration`: raw external assets with the bucket sensor, freshness checks per capture group, partition definitions, the first parse asset (TEPCO actuals) into dev ODS, automation on its downstream; `dagster dev` reading the prod raw bucket read-only | The local UI shows each source's captures per day with freshness checks, and a new capture starts the TEPCO parse on its own |
+| 3 | **Dagster, locally** | `jtf/src/jtf/orchestration`: raw external assets with the bucket sensor, freshness checks per source, partition definitions, the first parse asset (TEPCO actuals) into dev ODS, automation on its downstream; `dagster dev` reading the prod raw bucket read-only | The local UI shows each source's captures per day with freshness checks, and a new capture starts the TEPCO parse on its own |
 | 4 | **Dagster, in prod** | Terraform `platform` module: `e2-medium` VM without a public IP, Cloud NAT, IAP firewall rule, Cloud SQL `db-f1-micro` (Enterprise, Tokyo); `deploy/dagster`: `compose.prod.yaml` (webserver, daemon, code location by digest, Cloud SQL Auth Proxy) and `dagster.prod.yaml` (Postgres storage, Docker run launcher, pool limits); `release.yml` also points the code location at the new digest | Through an IAP tunnel, the prod UI shows every capture and the initial load with freshness checks green, and new captures are parsed into prod ODS on their own. A stopped capture shows up both as a failed freshness check and as a healthchecks.io alert |
 | 5 | Parse and warehouse | Every parser as an ODS asset; dbt DWD with versions, MW and JST slots; the `as_of` macro; DWS solar features partitioned by decision date; SQL rules in CI. Each piece is built in `dagster dev`, then released, and runs in prod from then on | dbt tests pass; one known day checked by hand against the source files; the prod lineage graph runs from raw files to DWS |
 | 6 | Time machine | Replay job (`mode`, `T` range, `fault` in run config) and `jtf replay`; run records in ADS; determinism and future-poison tests | Both tests green in CI |
@@ -57,15 +57,25 @@ Politeness: about 10 requests a day in normal running and no polling loops. Open
 
 ### Capture schedule
 
-The capture job runs outside Dagster, on Cloud Scheduler in the `Asia/Tokyo` time zone: three jobs, each starting the `jtf-fetch` Cloud Run Job with a capture group. It is the only part of the system that contacts the sources.
+Capture is organised **by source**: one source file is one capture job, one raw prefix, one Dagster raw asset and, later, one ODS table. Each source has its own Cloud Run job (`jtf-fetch-<source>`), its own Cloud Scheduler trigger in the `Asia/Tokyo` time zone, its own retry policy and its own health check, so a slow or failing source never affects another. Capture runs outside Dagster and is the only part of the system that contacts the sources.
 
-| Cron (JST) | Group | Fetches |
-| --- | --- | --- |
-| `45 8 * * *` | `morning` | Current month's `eria_jukyu` (plus the previous month on days 1–5); `AREA_YOSOKU`, `AREA_BGKEI`, `AREA_JISEKI`, `juyo-d1-j.csv`; Open-Meteo live for MSM, GSM and ECMWF IFS 0.25° at all points |
-| `0 11 * * *` | `jepx` | JEPX spot summary for the current fiscal year |
-| `0 19,22 * * *` | `evening` | `AREA_ONCE_YOSOKU`, `AREA_ONCE_BGKEI`. The file is cleared at about 23:13 and never archived |
+| Source | File | Cron (JST) | Retries |
+| --- | --- | --- | --- |
+| `tepco-actuals` | `eria_jukyu_YYYYMM_03.csv`, plus the previous month on days 1–5 | `45 8 * * *` | standard |
+| `tepco-area-forecast` | `AREA_YOSOKU.csv` | `45 8 * * *` | standard |
+| `tepco-area-bg-plan` | `AREA_BGKEI.csv` | `45 8 * * *` | standard |
+| `tepco-area-actuals-today` | `AREA_JISEKI.csv` | `45 8 * * *` | standard |
+| `tepco-demand-outlook` | `juyo-d1-j.csv` | `45 8 * * *` | standard |
+| `tepco-area-forecast-next-day` | `AREA_ONCE_YOSOKU.csv`, cleared at about 23:13 and never archived | `0 19,22 * * *` | standard |
+| `tepco-area-bg-plan-next-day` | `AREA_ONCE_BGKEI.csv` | `0 19,22 * * *` | standard |
+| `openmeteo-live` | One request: all nine points, MSM, GSM and ECMWF IFS 0.25° | `45 8 * * *` | patient: 10 s connect timeout, 5 attempts, 3 task retries, since connections from Cloud Run sometimes fail to open and a fresh attempt succeeds |
+| `jepx-spot` | `spot_summary_{FY}.csv` for the current fiscal year | `0 11 * * *` | standard |
 
-The morning capture runs at 08:45, before `T` (09:00), so its `known_at` is at or before `T` and the forecast can use it. Each capture group pings its own healthchecks.io check on success; a missing ping alerts.
+*Standard* is a 30 s timeout, 3 attempts on server errors and 1 task retry.
+
+The 08:45 captures run before `T` (09:00), so their `known_at` is at or before `T` and the forecast can use them.
+
+**Health checks:** one healthchecks.io check per source, named `jtf-<source>`. Jobs ping `https://hc-ping.com/<ping-key>/jtf-<source>`: `/start` when they begin, success only when every file was stored, `/fail` with the error otherwise. Only the project's ping key is a secret, and a check that doesn't exist yet is created on its first ping (`?create=1`); its cron and grace time are then set once in the UI: 15 minutes for 08:45 sources, 30 minutes for the others.
 
 ### Initial load
 
@@ -102,7 +112,7 @@ One-off executions of the capture job with `--initial`; Dagster then parses them
 
 ## Ingestion and warehouse
 
-**Fetch** (`jtf fetch --group G` or `--source S [--initial]`, in the capture job only) downloads a file and writes it unchanged through `storage`:
+**Fetch** (`jtf fetch --source S [--initial]`, in the capture jobs only) downloads a file and writes it unchanged through `storage`:
 
 - Path: `raw/{source}/{extraction_date_jst}/{fetched_at}_{filename}`, plus `{…}.meta.json` with fetch time, URL, request parameters, response headers and any update time found inside the file (`source_time`)
 - Create-only: `if_generation_match=0` in code, and the job's service account has only `roles/storage.objectCreator`, which cannot delete or overwrite. An existing file cannot be replaced even by a bug
@@ -141,7 +151,7 @@ Definitions live in `jtf/src/jtf/orchestration`; assets are thin wrappers over `
 | `ml` | Backtest and train jobs | – | Launched by hand with run config (phase 1, local) |
 | `replay` | Replay job | Decision-date range in run config | Launched by hand |
 
-**Checks:** freshness per capture group (morning by 09:00, `jepx` by 11:30, evening by 22:30); completeness (48 slots per day for actuals); units and ranges; dbt tests as asset checks. Every asset carries a code version, so a release that changes one marks its partitions out of date.
+**Checks:** freshness per source (08:45 sources by 09:00, `jepx-spot` by 11:30, next-day sources by 22:30); completeness (48 slots per day for actuals); units and ranges; dbt tests as asset checks. Every asset carries a code version, so a release that changes one marks its partitions out of date.
 
 **Environments:** `dagster dev` on the laptop uses local storage and runs in-process, reading the prod raw bucket read-only and writing to dev BigQuery. Prod Dagster uses Cloud SQL for storage and runs each run in its own container from the same image.
 
@@ -187,7 +197,7 @@ Run-config presets on the replay job (`fault=F1`, `mode=what-if`), launched from
 | ID | Injection | Should be caught by | Handling | Write-up shows |
 | --- | --- | --- | --- | --- |
 | F2 lookahead leak | Two variants: weather from `previous_day0`/`previous_day1` instead of `previous_day2`; and lags read D−1 actuals by bypassing `as_of` | The SQL rule in CI for the bypass; the future-poison test; the gap between leaky and as-of backtests | Block the merge | How much better the leaky backtest looked, per variant and segment |
-| F1 late weather | Drop the live run at `T` (and, in replay, the latest qualifying run) | The freshness check on the morning capture | Fallback ladder level 1, forecast flagged degraded, ranges widened | Accuracy and coverage cost of level 1 and level 2 over the backtest period |
+| F1 late weather | Drop the live run at `T` (and, in replay, the latest qualifying run) | The freshness check on `openmeteo-live` | Fallback ladder level 1, forecast flagged degraded, ranges widened | Accuracy and coverage cost of level 1 and level 2 over the backtest period |
 
 Each write-up uses the [template](../scenarios/README.md), with the expected outcome written before the run.
 
@@ -195,14 +205,14 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 
 | Where | What | Terraform |
 | --- | --- | --- |
-| Prod project, Tokyo: capture slice (step 1) | Raw bucket (uniform access, soft delete on); Artifact Registry repository; service account `jtf-fetch` with `roles/storage.objectCreator` on the raw bucket only; Cloud Run Job `jtf-fetch` pinned to an image digest; three Cloud Scheduler jobs; Secret Manager entries for the healthchecks.io ping URLs | `envs/prod`, `forecast_env` module |
+| Prod project, Tokyo: capture slice (step 1) | Raw bucket (uniform access, soft delete on); Artifact Registry repository; service account `jtf-fetch` with `roles/storage.objectCreator` on the raw bucket only; one Cloud Run job per source (`jtf-fetch-<source>`) pinned to an image digest; one Cloud Scheduler trigger per source and a `jtf-scheduler` service account allowed to run them; a Secret Manager entry for the healthchecks.io ping key | `envs/prod`, `forecast_env` module |
 | Prod project, Tokyo: Dagster (step 4) | `e2-medium` VM with no public IP and a 30 GB disk; Cloud NAT; firewall rule allowing only IAP's range; Cloud SQL Postgres `db-f1-micro`, Enterprise edition, no HA, database `dagster`; service account for the VM with BigQuery and read access to the raw bucket | `envs/prod`, `platform` module |
 | Dev project, Tokyo | Dev raw bucket for fetch tests; BigQuery datasets `ods`, `dwd`, `dws`, `ads` with per-developer and per-PR prefixes; read access to the prod raw bucket | `envs/dev` |
 | Both, via `deploy/bootstrap` | APIs; Terraform state bucket; Workload Identity Federation for GitHub (PRs reach dev; only `main` with the `prod` environment's approval reaches prod); CI service accounts; the budget on the dedicated billing account (¥12,000 a month, alerts at 75%, 100% and on forecast) | `bootstrap` |
 
 **Projects:** `jepx-tokyo-forecast-dev` and `jepx-tokyo-forecast-prod`, standalone (no organization), labelled `app=jtf` and `env=dev|prod`, on a dedicated billing account. The billing account ID stays out of the repo: Terraform reads it from a gitignored `terraform.tfvars`.
 
-**Cost in phase 1:** about $1 a month until step 4; then about $45–50, mostly the VM ($30–35) and Cloud SQL ($10–12). Check the VM price in Google's calculator, since third-party figures disagree.
+**Cost in phase 1:** about $1 a month until step 4 (nine scheduler triggers, six beyond the free tier, add about ¥90); then about $45–50, mostly the VM ($30–35) and Cloud SQL ($10–12). Check the VM price in Google's calculator, since third-party figures disagree.
 
 **Access:** the prod Dagster UI through `gcloud compute start-iap-tunnel` to the VM's webserver port; it is never public.
 
@@ -232,7 +242,7 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 
 | Risk | Mitigation |
 | --- | --- |
-| A missed capture day loses that day's TEPCO next-day forecast for good | Capture runs outside Dagster on its own schedules, with its own watchdog checks; gaps are recorded as gaps, never filled with later data |
+| A missed capture day loses that day's TEPCO next-day forecast for good | Capture runs outside Dagster, one job per source with its own schedule and health check; gaps are recorded as gaps, never filled with later data |
 | Setting up prod Dagster takes longer than planned | Step 3 gives the full value for feature work locally; prod Dagster can slip without touching capture, which runs on its own |
 | `db-f1-micro` is too small for Dagster (25 connections, 0.6 GB) | Pool sizes capped in `dagster.prod.yaml`; move to `db-g1-small` (about $26 a month) if it struggles |
 | A source changes its format or encoding | Raw files kept as received; schema and range checks at parse; fixtures from real files in `jtf/tests/fixtures` |

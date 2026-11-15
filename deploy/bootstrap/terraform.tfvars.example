@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+dev_project_id     = "my-forecast-dev"
+prod_project_id    = "my-forecast-prod"
+region             = "asia-northeast1"
+github_repository  = "my-github-user/my-fork"
+billing_account_id = "XXXXXX-XXXXXX-XXXXXX"
+monthly_budget_jpy = 12000
