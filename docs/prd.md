@@ -456,7 +456,7 @@ Drift and accuracy are dbt models, so the replay runner can recompute monitoring
 
 **Dashboard:** a custom React app, built into the same image and served by a Cloud Run service that scales to zero. It never queries BigQuery: after actuals land, the evaluate asset exports the monitoring tables as JSON snapshots to Cloud Storage, one folder per day. That keeps it fast and free, makes a public link safe, and lets the dashboard show any past day exactly as it looked then. Alerts come from checks and Cloud Monitoring, not from the dashboard.
 
-**Outside watchdog:** healthchecks.io, outside GCP. Each capture source pings its own check, and so does the publish step; if the daily forecast has not landed by 09:30, 30 minutes before the gate closure, it alerts. Dagster cannot be trusted to report that Dagster has stopped.
+**Outside watchdog:** healthchecks.io, outside GCP. Each capture source pings its own check. Dagster pings `jtf-dagster` every 15 minutes, and its run-failure sensor sends failed runs to the same check. The publish step pings too: if the daily forecast has not landed by 09:30, 30 minutes before the gate closure, it alerts. Dagster cannot be trusted to report that Dagster has stopped.
 
 **Backups**
 
