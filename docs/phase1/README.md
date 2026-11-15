@@ -2,7 +2,7 @@
 
 **Goal:** a Tokyo-area solar forecast built only from what was known at decision time, a time machine that proves it, and a measured account of what a lookahead leak does to a backtest. Two things run in prod from early on: the capture job, because some source data cannot be fetched later, and Dagster, so every capture and every pipeline run is visible from the start. Feature and model work happens in `dagster dev` on the laptop against the dev project.
 
-This is the working plan for phase 1 and is meant to be complete on its own. The [PRD](../prd.md) holds the overall design and the later phases.
+This is the working plan for phase 1 and is meant to be complete on its own. The [PRD](../prd.md) holds the overall design and the later phases. Where the work stands right now is in [progress.md](progress.md).
 
 ## Done when
 

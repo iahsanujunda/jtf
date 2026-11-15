@@ -98,3 +98,7 @@ CLAUDE.local.md
 # Dagster's local state (make dagster)
 .dagster/
 .tmp_dagster_home_*/
+
+# Personal working notes for coding agents; CLAUDE.md only imports AGENTS.md
+AGENTS.md
+CLAUDE.md
