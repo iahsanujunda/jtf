@@ -1,5 +1,5 @@
 # Local shortcuts only. CI calls the same tools directly.
-.PHONY: setup lint fmt test image
+.PHONY: setup lint fmt test image dagster
 
 IMAGE ?= jtf:local
 
@@ -19,3 +19,8 @@ test:
 
 image:
 	docker build -t $(IMAGE) .
+
+# Dagster on the laptop: UI on http://localhost:3000, state kept in .dagster/, settings from .env
+dagster:
+	mkdir -p .dagster
+	DAGSTER_HOME=$(CURDIR)/.dagster uv run dagster dev -m jtf.orchestration.definitions

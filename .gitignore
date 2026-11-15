@@ -94,3 +94,7 @@ CLAUDE.local.md
 
 # --- Logs ---
 *.log
+
+# Dagster's local state (make dagster)
+.dagster/
+.tmp_dagster_home_*/
