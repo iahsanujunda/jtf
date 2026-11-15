@@ -11,6 +11,10 @@ locals {
   }
 }
 
+# The raw bucket holds files that can't be fetched again: forecasts as they were published,
+# and each day's version of files TEPCO later rewrites. Hence three guards: Terraform refuses
+# any plan that destroys it, a deleted or overwritten file can be restored for 90 days (the
+# maximum), and a lien stops the project from being deleted.
 resource "google_storage_bucket" "raw" {
   project                     = var.project_id
   name                        = "${var.project_id}-raw"
@@ -20,8 +24,23 @@ resource "google_storage_bucket" "raw" {
   labels                      = local.labels
 
   soft_delete_policy {
-    retention_duration_seconds = 604800
+    retention_duration_seconds = 7776000
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+data "google_project" "this" {
+  project_id = var.project_id
+}
+
+resource "google_resource_manager_lien" "keep_project" {
+  parent       = "projects/${data.google_project.this.number}"
+  restrictions = ["resourcemanager.projects.delete"]
+  origin       = "jtf-terraform"
+  reason       = "Holds the raw bucket, whose files can't be fetched again"
 }
 
 resource "google_service_account" "fetch" {
