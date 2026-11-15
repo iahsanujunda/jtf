@@ -61,7 +61,7 @@ The capture job runs outside Dagster, on Cloud Scheduler in the `Asia/Tokyo` tim
 
 | Cron (JST) | Group | Fetches |
 | --- | --- | --- |
-| `45 8 * * *` | `morning` | Current month's `eria_jukyu` (plus the previous month on days 1–5); `AREA_YOSOKU`, `AREA_BGKEI`, `AREA_JISEKI`, `juyo-d1-j.csv`; Open-Meteo live for MSM and GSM at all points |
+| `45 8 * * *` | `morning` | Current month's `eria_jukyu` (plus the previous month on days 1–5); `AREA_YOSOKU`, `AREA_BGKEI`, `AREA_JISEKI`, `juyo-d1-j.csv`; Open-Meteo live for MSM, GSM and ECMWF IFS 0.25° at all points |
 | `0 11 * * *` | `jepx` | JEPX spot summary for the current fiscal year |
 | `0 19,22 * * *` | `evening` | `AREA_ONCE_YOSOKU`, `AREA_ONCE_BGKEI`. The file is cleared at about 23:13 and never archived |
 
@@ -221,7 +221,7 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 | Weather points and weights | The nine points above, equal weights, refined later | 1 |
 | GCP project IDs | Done: `jepx-tokyo-forecast-dev`, `jepx-tokyo-forecast-prod`, on a dedicated billing account | 1 |
 | Code license | Apache-2.0 or MIT | 9 |
-| Weather models | MSM for solar, GSM as a fallback and for coverage | 2 |
+| Weather models | MSM for solar; ECMWF IFS 0.25° as the radiation fallback, captured live from day one, because GSM has no radiation through Open-Meteo; GSM kept for cloud cover and temperature. Check which of these the Previous Runs API covers | 2 |
 | VM size | `e2-medium`; resize if runs need more memory | 4 |
 | Dagster UI access | IAP tunnel; Tailscale is the alternative if the tunnel gets tedious | 4 |
 | Solar capacity estimate | Candidate: METI's FIT/FIP disclosure of installed capacity by prefecture (to verify) | 5 |
