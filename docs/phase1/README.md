@@ -26,7 +26,7 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 | # | Step | Deliverables | Done check |
 | --- | --- | --- | --- |
 | 1 | **Capture, this week** | Repo skeleton (uv, `jtf` CLI, Dockerfile, Makefile, `ci.yml`); `deploy/bootstrap` (APIs, state bucket, WIF, CI service accounts, budget, importing the hand-made budget) behind `make bootstrap`; every account-specific value as a Terraform variable, with `terraform.tfvars.example` files; `storage` module; `jtf fetch` for every source; Terraform for the prod capture slice, one job and schedule per source; `release.yml` that builds the image and points the jobs at its digest; one healthchecks.io check per source | Every source's scheduled run lands files and sidecars in the prod raw bucket; a skipped or failed run alerts on that source's check |
-| 2 | Initial history load | `jtf fetch --initial` per source, as one-off executions of the capture job, tagged `initial` | Raw files for every range in [Initial load](#initial-load) |
+| 2 | Initial history load | `jtf fetch --source S --initial` for the history sources, run as one-off executions of the capture jobs: quota-aware pacing, resumable, tagged `initial`; the daily previous-month capture and the monthly re-capture (see [Learned improvements](#learned-improvements-from-the-history-probe)) | Raw files for every range in [Initial load](#initial-load); a re-run fetches nothing already stored |
 | 3 | **Dagster, locally** | `jtf/src/jtf/orchestration`: raw external assets with the bucket sensor, freshness checks per source, partition definitions, the first parse asset (TEPCO actuals) into dev ODS, automation on its downstream; `dagster dev` reading the prod raw bucket read-only | The local UI shows each source's captures per day with freshness checks, and a new capture starts the TEPCO parse on its own |
 | 4 | **Dagster, in prod** | Terraform `platform` module: `e2-medium` VM without a public IP, Cloud NAT, IAP firewall rule, Cloud SQL `db-f1-micro` (Enterprise, Tokyo); `deploy/dagster`: `compose.prod.yaml` (webserver, daemon, code location by digest, Cloud SQL Auth Proxy) and `dagster.prod.yaml` (Postgres storage, Docker run launcher, pool limits); `release.yml` also points the code location at the new digest | Through an IAP tunnel, the prod UI shows every capture and the initial load with freshness checks green, and new captures are parsed into prod ODS on their own. A stopped capture shows up both as a failed freshness check and as a healthchecks.io alert |
 | 5 | Parse and warehouse | Every parser as an ODS asset; dbt DWD with versions, MW and JST slots; the `as_of` macro; DWS solar features partitioned by decision date; SQL rules in CI. Each piece is built in `dagster dev`, then released, and runs in prod from then on | dbt tests pass; one known day checked by hand against the source files; the prod lineage graph runs from raw files to DWS |
@@ -39,7 +39,7 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 
 | Source | Files | Format and units | Phase-1 use |
 | --- | --- | --- | --- |
-| TEPCO area actuals | `https://www.tepco.co.jp/forecast/html/images/eria_jukyu_YYYYMM_03.csv` (one per month, from 2024-02); older `area-YYYY.csv` (one per fiscal year, FY2016–2023, hourly) | Shift_JIS; row 1 `単位[MW平均]`; 30-min slots labelled by start time; **MW averaged over the slot**. Columns include `太陽光発電実績`, `太陽光出力制御量` (curtailment), `風力発電実績` | Target, lags |
+| TEPCO area actuals | `https://www.tepco.co.jp/forecast/html/images/eria_jukyu_YYYYMM_03.csv` (one per month, from 2024-02); older `area-YYYY.csv` (one per fiscal year, FY2016–2023, hourly) UTF-8 or CP932, **varying from file to file**; row 1 `単位[MW平均]`; 30-min slots labelled by start time; **MW averaged over the slot**. The yearly files differ: 万kWh per hour, a two-row header, thousands separators, one thermal column. Columns include `太陽光発電実績`, `太陽光出力制御量` (curtailment), `風力発電実績` | Target, lags |
 | TEPCO next-day forecast | `https://www4.tepco.co.jp/forecast/html/images/AREA_ONCE_YOSOKU.csv`, `AREA_ONCE_BGKEI.csv` | Shift_JIS; row 2 holds the file's update time and target date; `時間コマ` 1–48; **kWh per slot**; **wind + solar combined** | Benchmark only |
 | TEPCO same-day files | `AREA_YOSOKU.csv`, `AREA_BGKEI.csv`, `AREA_JISEKI.csv` (same folder); `juyo-d1-j.csv` | kWh per slot; 万kW, hourly and 5-min | Captured only, not parsed yet |
 | Open-Meteo Previous Runs | `https://previous-runs-api.open-meteo.com/v1/forecast`, `models=jma_msm,jma_gsm`, variables with `_previous_day2` | JSON, hourly | Weather features over the long history |
@@ -61,7 +61,8 @@ Capture is organised **by source**: one source file is one capture job, one raw 
 
 | Source | File | Cron (JST) | Retries |
 | --- | --- | --- | --- |
-| `tepco_actuals` | `eria_jukyu_YYYYMM_03.csv`, plus the previous month on days 1–5 | `45 8 * * *` | standard |
+| `tepco_actuals` | `eria_jukyu_YYYYMM_03.csv` for the current and the previous month | `45 8 * * *` | standard |
+| `tepco_actuals` (re-capture) | Every monthly `eria_jukyu` file, sent with `If-Modified-Since`; only rewritten files are stored, tagged `recapture` | `30 9 1 * *` | standard |
 | `tepco_area_forecast` | `AREA_YOSOKU.csv` | `45 8 * * *` | standard |
 | `tepco_area_bg_plan` | `AREA_BGKEI.csv` | `45 8 * * *` | standard |
 | `tepco_area_actuals_today` | `AREA_JISEKI.csv` | `45 8 * * *` | standard |
@@ -79,15 +80,32 @@ The 08:45 captures run before `T` (09:00), so their `known_at` is at or before `
 
 ### Initial load
 
-One-off executions of the capture job with `--initial`; Dagster then parses them like any capture.
+One-off executions of the capture jobs with `--initial` (and a longer task timeout); Dagster then parses the files like any capture. The numbers come from [the history probe](../../notebooks/01_history_probe.ipynb).
 
-| Source | Range | Notes |
+| Source | Range | Requests | Notes |
+| --- | --- | --- | --- |
+| `tepco_actuals` | Monthly files from 2024-02; yearly files FY2016–FY2023, kept raw | about 42, 8 MB | Final values: later corrections are baked in. The yearly files are parsed only when a later phase needs them |
+| `jepx_spot` | FY2016 to last fiscal year | about 10, 20 MB | The current year comes from the daily capture |
+| `openmeteo_previous_runs` (history only) | 2024-01 to now, one request per calendar month, all three models, leads `latest`, `previous_day1`, `previous_day2` | about 35, 3,600 Open-Meteo calls | `latest` and `previous_day1` exist only for the leak scenario F2; features use `previous_day2`. MSM's leads exist from mid-2022 to mid-2023 onward, ECMWF's from spring 2024 |
+| `openmeteo_single_runs` (history only) | 2026-04-02 to now: MSM 18 and 21 UTC, GSM and ECMWF 12 and 18 UTC, each day | about 1,400, 12,000 calls | More than a day of free quota: the loader paces itself from `X-RateLimit-Cost`, stops cleanly near the daily limit and resumes the next day |
+| TEPCO next-day forecast | None exists | – | The benchmark starts at the first capture |
+
+**Loader requirements:** items are generated from name patterns and date ranges; an item already stored under its source is skipped, so a re-run or a resume costs nothing; every file is stored like a daily capture, with `load_type: initial` in its sidecar; `known_at` comes from the history rules at parse time, not at fetch time.
+
+### Learned improvements from the history probe
+
+Each change below came out of [the history probe](../../notebooks/01_history_probe.ipynb) and was confirmed there before being adopted.
+
+| Learned | Evidence | Change |
 | --- | --- | --- |
-| TEPCO actuals | 2024-02 to now (30-min); FY2016–2023 hourly kept raw only | Final values: later corrections are baked in |
-| JEPX | FY2016 to now | About 1.4 MB per fiscal year |
-| Open-Meteo Previous Runs | 2024-01-01 to now, `previous_day2` | Matches the 30-min TEPCO labels; JMA goes back to 2018 if needed later |
-| Open-Meteo Single Runs | 2026-04-02 to now: per day, the MSM 12 and 18 UTC runs and the GSM 12 UTC run | The runs that could be the latest available at `T`. Confirm each run's horizon from the data |
-| TEPCO next-day forecast | None exists | The benchmark starts at the first capture |
+| TEPCO rewrites a month's file for weeks after the month ends | `Last-Modified` dates weeks into the following month | Capture the previous month **every day**, not only on days 1–5 |
+| TEPCO occasionally rewrites old files in bulk | February and August 2024 and FY2023 all rewritten on the same day in October 2024 | **Monthly re-capture** of every monthly file on the 1st |
+| TEPCO honours `If-Modified-Since` but ignores `If-None-Match` | Confirmation probe: `304` vs a full `200` | The re-capture sends the stored `Last-Modified`; only rewritten files are stored |
+| Encoding varies from file to file | UTF-8 for most of 2024–26, CP932 for the newest files and the yearly files | Parsers detect the encoding per file |
+| Open-Meteo history costs by size, about 104 calls a month | `X-RateLimit-Cost`, matched by a formula | Quota-aware pacing and a resumable loader |
+| Open-Meteo drops the model suffix when one model is requested | Column names in single-model responses | Parsers accept both column forms |
+| Lead history is shorter than documented | MSM's leads from mid-2022 to mid-2023, ECMWF's from spring 2024 | Nulls are kept as data; features fall back explicitly |
+| Some decision-time runs land exactly at `T` | MSM 21 UTC, GSM and ECMWF 18 UTC with the assumed delays | Two runs per model per day in the single-runs history |
 
 ## Point-in-time rules
 
@@ -231,7 +249,7 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 | Weather points and weights | The nine points above, equal weights, refined later | 1 |
 | GCP project IDs | Done: `jepx-tokyo-forecast-dev`, `jepx-tokyo-forecast-prod`, on a dedicated billing account | 1 |
 | Code license | Apache-2.0 or MIT | 9 |
-| Weather models | MSM for solar; ECMWF IFS 0.25° as the radiation fallback, captured live from day one, because GSM has no radiation through Open-Meteo; GSM kept for cloud cover and temperature. Check which of these the Previous Runs API covers | 2 |
+| Weather models | Done: MSM for solar; ECMWF IFS 0.25° as the radiation fallback (its history starts in spring 2024), because GSM has no radiation through Open-Meteo; GSM kept for cloud cover and temperature | 2 |
 | VM size | `e2-medium`; resize if runs need more memory | 4 |
 | Dagster UI access | IAP tunnel; Tailscale is the alternative if the tunnel gets tedious | 4 |
 | Solar capacity estimate | Candidate: METI's FIT/FIP disclosure of installed capacity by prefecture (to verify) | 5 |
