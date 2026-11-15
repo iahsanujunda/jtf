@@ -25,6 +25,10 @@ class Store(Protocol):
 
     def get(self, path: str) -> bytes: ...
 
+    def list(self, prefix: str) -> list[str]:
+        """Every stored path under `prefix`, relative to the store."""
+        ...
+
 
 class LocalStore:
     def __init__(self, root: Path):
@@ -43,6 +47,12 @@ class LocalStore:
 
     def get(self, path: str) -> bytes:
         return (self.root / path).read_bytes()
+
+    def list(self, prefix: str) -> list[str]:
+        base = self.root / prefix
+        if not base.exists():
+            return []
+        return sorted(str(f.relative_to(self.root)) for f in base.rglob("*") if f.is_file())
 
 
 class GcsStore:
@@ -73,6 +83,10 @@ class GcsStore:
 
     def get(self, path: str) -> bytes:
         return self.bucket.blob(self._name(path)).download_as_bytes()
+
+    def list(self, prefix: str) -> list[str]:
+        strip = len(self.prefix) + 1 if self.prefix else 0
+        return sorted(b.name[strip:] for b in self.bucket.list_blobs(prefix=self._name(prefix)))
 
 
 def open_store(url: str) -> Store:

@@ -4,7 +4,8 @@ The `jtf` entry point. Each subcommand is a thin wrapper over a function in anot
 
 | Command | Does | Phase |
 | --- | --- | --- |
-| `jtf fetch --source S [--initial]` | Download a source into the raw bucket | 1 |
+| `jtf fetch --source S [--initial \| --recapture] [--max-calls N]` | Download a source into the raw bucket: daily, the one-off history load, or the monthly check for rewrites | 1 |
+| `jtf sources` | List the sources and the modes each supports | 1 |
 | `jtf parse --source S --from D1 --to D2` | Raw files → ODS rows (normally run by Dagster's ODS assets) | 1 |
 | `jtf transform [--select …]` | Run dbt for the derived layers | 1 |
 | `jtf backtest` / `jtf train` | Rolling backtest; train a model version | 1 |

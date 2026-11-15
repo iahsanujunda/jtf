@@ -23,10 +23,12 @@ variable "image" {
 }
 
 variable "capture_sources" {
-  description = "Capture source => cron schedule (Asia/Tokyo) and Cloud Run task retries. Names match `jtf sources`."
+  description = "Scheduled capture jobs. Key => cron schedule (Asia/Tokyo), Cloud Run task retries, and optionally the source (defaults to the key) and extra jtf arguments. Source names match `jtf sources`."
   type = map(object({
     schedule     = string
     task_retries = number
+    source       = optional(string)
+    extra_args   = optional(list(string), [])
   }))
   default = {
     tepco_actuals                = { schedule = "45 8 * * *", task_retries = 1 }
@@ -39,5 +41,12 @@ variable "capture_sources" {
     # Connections from Cloud Run to Open-Meteo sometimes fail to open; a fresh container succeeds.
     openmeteo_live = { schedule = "45 8 * * *", task_retries = 3 }
     jepx_spot      = { schedule = "0 11 * * *", task_retries = 1 }
+    # TEPCO rewrites old months, occasionally in bulk; check every monthly file once a month.
+    tepco_actuals_recapture = {
+      source       = "tepco_actuals"
+      extra_args   = ["--recapture"]
+      schedule     = "30 9 1 * *"
+      task_retries = 1
+    }
   }
 }

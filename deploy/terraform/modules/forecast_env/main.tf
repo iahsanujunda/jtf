@@ -3,8 +3,12 @@
 
 locals {
   labels = { app = "jtf", env = var.env }
-  # Source names use underscores; Cloud Run and Cloud Scheduler names need hyphens.
-  job_names = { for source, _ in var.capture_sources : source => "jtf-fetch-${replace(source, "_", "-")}" }
+  # Keys use underscores; Cloud Run and Cloud Scheduler names need hyphens.
+  job_names = { for key, _ in var.capture_sources : key => "jtf-fetch-${replace(key, "_", "-")}" }
+  job_args = {
+    for key, job in var.capture_sources :
+    key => concat(["fetch", "--source", coalesce(job.source, key)], job.extra_args)
+  }
 }
 
 resource "google_storage_bucket" "raw" {
@@ -73,7 +77,7 @@ resource "google_cloud_run_v2_job" "capture" {
 
       containers {
         image = var.image
-        args  = ["fetch", "--source", each.key]
+        args  = local.job_args[each.key]
 
         resources {
           limits = {

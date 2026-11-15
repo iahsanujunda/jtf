@@ -76,7 +76,7 @@ Capture is organised **by source**: one source file is one capture job, one raw 
 
 The 08:45 captures run before `T` (09:00), so their `known_at` is at or before `T` and the forecast can use them.
 
-**Health checks:** one healthchecks.io check per source, named `jtf-<source>`. Jobs ping `https://hc-ping.com/<ping-key>/jtf-<source>`: `/start` when they begin, success only when every file was stored, `/fail` with the error otherwise. Only the project's ping key is a secret, and a check that doesn't exist yet is created on its first ping (`?create=1`); its cron and grace time are then set once in the UI: 15 minutes for 08:45 sources, 30 minutes for the others.
+**Health checks:** one healthchecks.io check per source, named `jtf-<source>`. Jobs ping `https://hc-ping.com/<ping-key>/jtf-<source>`: `/start` when they begin, success only when every file was stored, `/fail` with the error otherwise. Only the project's ping key is a secret, and a check that doesn't exist yet is created on its first ping (`?create=1`); its cron and grace time are then set once in the UI: 15 minutes for 08:45 sources, 30 minutes for the others. The monthly re-capture pings its own check, `jtf-tepco-actuals-recapture`; one-off initial loads don't ping.
 
 ### Initial load
 

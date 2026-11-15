@@ -40,6 +40,9 @@ class FakeBucket:
     def blob(self, name):
         return FakeBlob(self, name)
 
+    def list_blobs(self, prefix):
+        return [FakeBlob(self, name) for name in sorted(self.objects) if name.startswith(prefix)]
+
 
 def test_gcs_store_uses_create_only_precondition():
     bucket = FakeBucket()
@@ -54,3 +57,20 @@ def test_open_store_parses_urls(tmp_path):
     assert isinstance(open_store(tmp_path.as_uri()), LocalStore)
     with pytest.raises(ValueError):
         open_store("s3://bucket")
+
+
+def test_local_store_lists_paths_under_a_prefix(tmp_path):
+    store = LocalStore(tmp_path)
+    store.put_new("a/2026-11-15/x.csv", b"1", "text/csv")
+    store.put_new("a/2026-11-16/y.csv", b"2", "text/csv")
+    store.put_new("b/z.csv", b"3", "text/csv")
+    assert store.list("a/") == ["a/2026-11-15/x.csv", "a/2026-11-16/y.csv"]
+    assert store.list("missing/") == []
+
+
+def test_gcs_store_lists_relative_to_its_prefix():
+    bucket = FakeBucket()
+    store = GcsStore("raw-bucket", "prefix", bucket=bucket)
+    store.put_new("a/x.csv", b"1", "text/csv")
+    store.put_new("b/y.csv", b"2", "text/csv")
+    assert store.list("a/") == ["a/x.csv"]

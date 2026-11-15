@@ -3,7 +3,7 @@ output "raw_bucket" {
 }
 
 output "capture_jobs" {
-  value = { for group, job in google_cloud_run_v2_job.capture : group => job.name }
+  value = { for key, job in google_cloud_run_v2_job.capture : key => job.name }
 }
 
 output "healthcheck_ping_key_secret" {
