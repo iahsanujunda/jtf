@@ -22,12 +22,22 @@ variable "image" {
   }
 }
 
-variable "capture_groups" {
-  description = "Capture group => cron schedule in Asia/Tokyo."
-  type        = map(string)
+variable "capture_sources" {
+  description = "Capture source => cron schedule (Asia/Tokyo) and Cloud Run task retries. Names match `jtf sources`."
+  type = map(object({
+    schedule     = string
+    task_retries = number
+  }))
   default = {
-    morning = "45 8 * * *"
-    jepx    = "0 11 * * *"
-    evening = "0 19,22 * * *"
+    tepco_actuals                = { schedule = "45 8 * * *", task_retries = 1 }
+    tepco_area_forecast          = { schedule = "45 8 * * *", task_retries = 1 }
+    tepco_area_bg_plan           = { schedule = "45 8 * * *", task_retries = 1 }
+    tepco_area_actuals_today     = { schedule = "45 8 * * *", task_retries = 1 }
+    tepco_demand_outlook         = { schedule = "45 8 * * *", task_retries = 1 }
+    tepco_area_forecast_next_day = { schedule = "0 19,22 * * *", task_retries = 1 }
+    tepco_area_bg_plan_next_day  = { schedule = "0 19,22 * * *", task_retries = 1 }
+    # Connections from Cloud Run to Open-Meteo sometimes fail to open; a fresh container succeeds.
+    openmeteo_live = { schedule = "45 8 * * *", task_retries = 3 }
+    jepx_spot      = { schedule = "0 11 * * *", task_retries = 1 }
   }
 }

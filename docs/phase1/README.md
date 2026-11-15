@@ -57,19 +57,19 @@ Politeness: about 10 requests a day in normal running and no polling loops. Open
 
 ### Capture schedule
 
-Capture is organised **by source**: one source file is one capture job, one raw prefix, one Dagster raw asset and, later, one ODS table. Each source has its own Cloud Run job (`jtf-fetch-<source>`), its own Cloud Scheduler trigger in the `Asia/Tokyo` time zone, its own retry policy and its own health check, so a slow or failing source never affects another. Capture runs outside Dagster and is the only part of the system that contacts the sources.
+Capture is organised **by source**: one source file is one capture job, one raw prefix, one Dagster raw asset and, later, one ODS table. Source names use underscores, because Dagster asset keys and BigQuery tables need them; Cloud Run jobs and health checks swap them for hyphens (`tepco_actuals` runs as `jtf-fetch-tepco-actuals` and pings `jtf-tepco-actuals`). Each source has its own Cloud Run job, its own Cloud Scheduler trigger in the `Asia/Tokyo` time zone, its own retry policy and its own health check, so a slow or failing source never affects another. Capture runs outside Dagster and is the only part of the system that contacts the sources.
 
 | Source | File | Cron (JST) | Retries |
 | --- | --- | --- | --- |
-| `tepco-actuals` | `eria_jukyu_YYYYMM_03.csv`, plus the previous month on days 1–5 | `45 8 * * *` | standard |
-| `tepco-area-forecast` | `AREA_YOSOKU.csv` | `45 8 * * *` | standard |
-| `tepco-area-bg-plan` | `AREA_BGKEI.csv` | `45 8 * * *` | standard |
-| `tepco-area-actuals-today` | `AREA_JISEKI.csv` | `45 8 * * *` | standard |
-| `tepco-demand-outlook` | `juyo-d1-j.csv` | `45 8 * * *` | standard |
-| `tepco-area-forecast-next-day` | `AREA_ONCE_YOSOKU.csv`, cleared at about 23:13 and never archived | `0 19,22 * * *` | standard |
-| `tepco-area-bg-plan-next-day` | `AREA_ONCE_BGKEI.csv` | `0 19,22 * * *` | standard |
-| `openmeteo-live` | One request: all nine points, MSM, GSM and ECMWF IFS 0.25° | `45 8 * * *` | patient: 10 s connect timeout, 5 attempts, 3 task retries, since connections from Cloud Run sometimes fail to open and a fresh attempt succeeds |
-| `jepx-spot` | `spot_summary_{FY}.csv` for the current fiscal year | `0 11 * * *` | standard |
+| `tepco_actuals` | `eria_jukyu_YYYYMM_03.csv`, plus the previous month on days 1–5 | `45 8 * * *` | standard |
+| `tepco_area_forecast` | `AREA_YOSOKU.csv` | `45 8 * * *` | standard |
+| `tepco_area_bg_plan` | `AREA_BGKEI.csv` | `45 8 * * *` | standard |
+| `tepco_area_actuals_today` | `AREA_JISEKI.csv` | `45 8 * * *` | standard |
+| `tepco_demand_outlook` | `juyo-d1-j.csv` | `45 8 * * *` | standard |
+| `tepco_area_forecast_next_day` | `AREA_ONCE_YOSOKU.csv`, cleared at about 23:13 and never archived | `0 19,22 * * *` | standard |
+| `tepco_area_bg_plan_next_day` | `AREA_ONCE_BGKEI.csv` | `0 19,22 * * *` | standard |
+| `openmeteo_live` | One request: all nine points, MSM, GSM and ECMWF IFS 0.25° | `45 8 * * *` | patient: 10 s connect timeout, 5 attempts, 3 task retries, since connections from Cloud Run sometimes fail to open and a fresh attempt succeeds |
+| `jepx_spot` | `spot_summary_{FY}.csv` for the current fiscal year | `0 11 * * *` | standard |
 
 *Standard* is a 30 s timeout, 3 attempts on server errors and 1 task retry.
 
@@ -151,7 +151,7 @@ Definitions live in `jtf/src/jtf/orchestration`; assets are thin wrappers over `
 | `ml` | Backtest and train jobs | – | Launched by hand with run config (phase 1, local) |
 | `replay` | Replay job | Decision-date range in run config | Launched by hand |
 
-**Checks:** freshness per source (08:45 sources by 09:00, `jepx-spot` by 11:30, next-day sources by 22:30); completeness (48 slots per day for actuals); units and ranges; dbt tests as asset checks. Every asset carries a code version, so a release that changes one marks its partitions out of date.
+**Checks:** freshness per source (08:45 sources by 09:00, `jepx_spot` by 11:30, next-day sources by 22:30); completeness (48 slots per day for actuals); units and ranges; dbt tests as asset checks. Every asset carries a code version, so a release that changes one marks its partitions out of date.
 
 **Environments:** `dagster dev` on the laptop uses local storage and runs in-process, reading the prod raw bucket read-only and writing to dev BigQuery. Prod Dagster uses Cloud SQL for storage and runs each run in its own container from the same image.
 
@@ -197,7 +197,7 @@ Run-config presets on the replay job (`fault=F1`, `mode=what-if`), launched from
 | ID | Injection | Should be caught by | Handling | Write-up shows |
 | --- | --- | --- | --- | --- |
 | F2 lookahead leak | Two variants: weather from `previous_day0`/`previous_day1` instead of `previous_day2`; and lags read D−1 actuals by bypassing `as_of` | The SQL rule in CI for the bypass; the future-poison test; the gap between leaky and as-of backtests | Block the merge | How much better the leaky backtest looked, per variant and segment |
-| F1 late weather | Drop the live run at `T` (and, in replay, the latest qualifying run) | The freshness check on `openmeteo-live` | Fallback ladder level 1, forecast flagged degraded, ranges widened | Accuracy and coverage cost of level 1 and level 2 over the backtest period |
+| F1 late weather | Drop the live run at `T` (and, in replay, the latest qualifying run) | The freshness check on `openmeteo_live` | Fallback ladder level 1, forecast flagged degraded, ranges widened | Accuracy and coverage cost of level 1 and level 2 over the backtest period |
 
 Each write-up uses the [template](../scenarios/README.md), with the expected outcome written before the run.
 

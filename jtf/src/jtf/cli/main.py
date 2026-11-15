@@ -28,24 +28,34 @@ def version() -> None:
 
 
 @app.command()
+def sources() -> None:
+    """List the capture sources."""
+    from jtf.ingest.sources import SOURCES
+
+    for name, source in SOURCES.items():
+        typer.echo(f"{name}\t{source.retry.attempts} attempts")
+
+
+@app.command()
 def fetch(
-    group: Annotated[str, typer.Option(help="Capture group: morning, jepx or evening.")],
+    source: Annotated[str, typer.Option(help="Capture source; see `jtf sources`.")],
     raw_url: Annotated[
         str | None,
         typer.Option(envvar="JTF_RAW_URL", help="Raw store: gs://bucket or file:///path."),
     ] = None,
 ) -> None:
-    """Download a capture group's files into the raw store, unchanged, with metadata sidecars."""
-    from jtf.ingest.fetch import Healthcheck, run_group
+    """Download one source's files into the raw store, unchanged, with metadata sidecars."""
+    from jtf.ingest.fetch import Healthcheck, run_source
+    from jtf.ingest.sources import get_source
     from jtf.storage import open_store
 
     if not raw_url:
         raise typer.BadParameter("Set --raw-url or JTF_RAW_URL.")
-    healthcheck = Healthcheck(os.environ.get(f"JTF_HEALTHCHECK_URL_{group.upper()}"))
-    result = run_group(
-        group,
+    src = get_source(source)
+    result = run_source(
+        src,
         store=open_store(raw_url),
-        healthcheck=healthcheck,
+        healthcheck=Healthcheck.for_source(os.environ.get("JTF_HEALTHCHECK_PING_KEY"), src),
         image_digest=os.environ.get("JTF_IMAGE_DIGEST"),
     )
     typer.echo(result.summary())

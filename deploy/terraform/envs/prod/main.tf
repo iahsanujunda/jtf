@@ -36,6 +36,6 @@ output "capture_jobs" {
   value = module.forecast_env.capture_jobs
 }
 
-output "healthcheck_secrets" {
-  value = module.forecast_env.healthcheck_secrets
+output "healthcheck_ping_key_secret" {
+  value = module.forecast_env.healthcheck_ping_key_secret
 }

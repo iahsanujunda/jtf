@@ -1,8 +1,10 @@
-# One environment's capture slice: the raw bucket, one Cloud Run job per capture group,
+# One environment's capture slice: the raw bucket, one Cloud Run job per capture source,
 # and the schedules that start them. Capture deliberately depends on nothing else.
 
 locals {
   labels = { app = "jtf", env = var.env }
+  # Source names use underscores; Cloud Run and Cloud Scheduler names need hyphens.
+  job_names = { for source, _ in var.capture_sources : source => "jtf-fetch-${replace(source, "_", "-")}" }
 }
 
 resource "google_storage_bucket" "raw" {
@@ -32,13 +34,12 @@ resource "google_storage_bucket_iam_member" "fetch_creates_raw" {
   member = "serviceAccount:${google_service_account.fetch.email}"
 }
 
-# Containers only. Values are added with `gcloud secrets versions add`, so they never
-# appear in git or in Terraform state.
-resource "google_secret_manager_secret" "healthcheck" {
-  for_each = var.capture_groups
-
+# The healthchecks.io project ping key; each job pings its own slug with it.
+# Container only: the value is added with `gcloud secrets versions add`, so it never
+# appears in git or in Terraform state.
+resource "google_secret_manager_secret" "healthcheck_ping_key" {
   project   = var.project_id
-  secret_id = "jtf-healthcheck-${each.key}"
+  secret_id = "jtf-healthcheck-ping-key"
   labels    = local.labels
 
   replication {
@@ -46,20 +47,18 @@ resource "google_secret_manager_secret" "healthcheck" {
   }
 }
 
-resource "google_secret_manager_secret_iam_member" "fetch_reads_healthcheck" {
-  for_each = var.capture_groups
-
+resource "google_secret_manager_secret_iam_member" "fetch_reads_ping_key" {
   project   = var.project_id
-  secret_id = google_secret_manager_secret.healthcheck[each.key].secret_id
+  secret_id = google_secret_manager_secret.healthcheck_ping_key.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.fetch.email}"
 }
 
 resource "google_cloud_run_v2_job" "capture" {
-  for_each = var.capture_groups
+  for_each = var.capture_sources
 
   project             = var.project_id
-  name                = "jtf-fetch-${each.key}"
+  name                = local.job_names[each.key]
   location            = var.region
   deletion_protection = false
   labels              = local.labels
@@ -70,11 +69,11 @@ resource "google_cloud_run_v2_job" "capture" {
     template {
       service_account = google_service_account.fetch.email
       timeout         = "600s"
-      max_retries     = 1
+      max_retries     = each.value.task_retries
 
       containers {
         image = var.image
-        args  = ["fetch", "--group", each.key]
+        args  = ["fetch", "--source", each.key]
 
         resources {
           limits = {
@@ -92,10 +91,10 @@ resource "google_cloud_run_v2_job" "capture" {
           value = var.image
         }
         env {
-          name = "JTF_HEALTHCHECK_URL_${upper(each.key)}"
+          name = "JTF_HEALTHCHECK_PING_KEY"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.healthcheck[each.key].secret_id
+              secret  = google_secret_manager_secret.healthcheck_ping_key.secret_id
               version = "latest"
             }
           }
@@ -104,7 +103,7 @@ resource "google_cloud_run_v2_job" "capture" {
     }
   }
 
-  depends_on = [google_secret_manager_secret_iam_member.fetch_reads_healthcheck]
+  depends_on = [google_secret_manager_secret_iam_member.fetch_reads_ping_key]
 }
 
 resource "google_service_account" "scheduler" {
@@ -114,7 +113,7 @@ resource "google_service_account" "scheduler" {
 }
 
 resource "google_cloud_run_v2_job_iam_member" "scheduler_runs_capture" {
-  for_each = var.capture_groups
+  for_each = var.capture_sources
 
   project  = var.project_id
   location = var.region
@@ -124,12 +123,12 @@ resource "google_cloud_run_v2_job_iam_member" "scheduler_runs_capture" {
 }
 
 resource "google_cloud_scheduler_job" "capture" {
-  for_each = var.capture_groups
+  for_each = var.capture_sources
 
   project          = var.project_id
   region           = var.region
-  name             = "jtf-fetch-${each.key}"
-  schedule         = each.value
+  name             = local.job_names[each.key]
+  schedule         = each.value.schedule
   time_zone        = "Asia/Tokyo"
   attempt_deadline = "60s"
 
