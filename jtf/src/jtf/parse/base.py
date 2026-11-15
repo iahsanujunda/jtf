@@ -79,6 +79,31 @@ class RawFile:
         }
 
 
+WHOLE_NUMBER = r"-?\d+"
+
+
+def whole_numbers(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Type columns as whole numbers. Every file seen so far has only those there, so a decimal
+    or text is refused: it most likely means the unit or the layout changed."""
+    for column in columns:
+        values = df[column].replace("", None)
+        present = values.dropna().astype(str)
+        odd = present[~present.str.fullmatch(WHOLE_NUMBER)]
+        if len(odd):
+            raise Refused(f"{column} has a value that is not a whole number: {odd.iloc[0]!r}")
+        df[column] = pd.to_numeric(values).astype("Int64")
+    return df
+
+
+def decimals(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    for column in columns:
+        try:
+            df[column] = pd.to_numeric(df[column].replace("", None)).astype("Float64")
+        except (ValueError, TypeError) as e:
+            raise Refused(f"{column} has a value that is not a number: {e}") from e
+    return df
+
+
 def read_raw(store: Store, path: str) -> RawFile:
     return RawFile(path, json.loads(store.get(path + SIDECAR)), store.get(path))
 

@@ -1,0 +1,27 @@
+{
+  "source": "tepco_area_forecast_next_day",
+  "filename": "AREA_ONCE_YOSOKU.csv",
+  "load_type": "daily",
+  "url": "https://www4.tepco.co.jp/forecast/html/images/AREA_ONCE_YOSOKU.csv",
+  "method": "GET",
+  "params": {},
+  "form": {},
+  "fetched_at": "2026-11-15T03:24:01.513678+00:00",
+  "fetched_at_jst": "2026-11-15T12:24:01.513678+09:00",
+  "extraction_date": "2026-11-15",
+  "http_status": 200,
+  "response_headers": {
+    "server": "Apache",
+    "last-modified": "Sat, 14 Nov 2026 14:20:04 GMT",
+    "etag": "\"fe-6603d3db49c56\"",
+    "accept-ranges": "bytes",
+    "content-length": "254",
+    "content-type": "text/csv",
+    "date": "Sun, 15 Nov 2026 03:24:01 GMT",
+    "connection": "keep-alive"
+  },
+  "size_bytes": 254,
+  "sha256": "1886c1aa3d6a729349cc8ffd2cf18cbbece01e4b1608728cbba181af0a974994",
+  "jtf_version": "0.1.0",
+  "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:00c7f5e404da1ee091da849846ff558eaee891167a8c4ef3e9a8167ee8d2eb7c"
+}

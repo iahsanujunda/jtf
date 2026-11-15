@@ -1,0 +1,29 @@
+{
+  "source": "jepx_spot",
+  "filename": "spot_summary_2026.csv",
+  "load_type": "daily",
+  "url": "https://www.jepx.jp/_download.php",
+  "method": "POST",
+  "params": {},
+  "form": {
+    "dir": "spot_summary",
+    "file": "spot_summary_2026.csv"
+  },
+  "fetched_at": "2026-11-15T03:24:02.979910+00:00",
+  "fetched_at_jst": "2026-11-15T12:24:02.979910+09:00",
+  "extraction_date": "2026-11-15",
+  "http_status": 200,
+  "response_headers": {
+    "server": "nginx",
+    "date": "Sun, 15 Nov 2026 03:24:02 GMT",
+    "content-type": "application/octet-stream; name=spot_summary_2026.csv",
+    "transfer-encoding": "chunked",
+    "connection": "keep-alive",
+    "content-disposition": "attachment; filename=spot_summary_2026.csv",
+    "cache-control": "no-store"
+  },
+  "size_bytes": 13122,
+  "sha256": "4032e33a1f287f1b6923a5171e7e215d7d47fe3618d31e9358fed25df2ff4d24",
+  "jtf_version": "0.1.0",
+  "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:00c7f5e404da1ee091da849846ff558eaee891167a8c4ef3e9a8167ee8d2eb7c"
+}

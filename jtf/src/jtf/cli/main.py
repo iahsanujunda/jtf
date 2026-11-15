@@ -85,6 +85,10 @@ def parse(
     to_day: Annotated[
         str | None, typer.Option("--to", help="Last extraction day; defaults to --from.")
     ] = None,
+    table: Annotated[
+        str | None,
+        typer.Option(help="Only this ODS table, when the source has several layouts."),
+    ] = None,
     raw_url: Annotated[
         str | None,
         typer.Option(envvar="JTF_RAW_URL", help="Raw store: gs://bucket or file:///path."),
@@ -105,7 +109,9 @@ def parse(
 
     if not raw_url or not bigquery_project:
         raise typer.BadParameter("Set --raw-url and --bigquery-project, or their JTF_ variables.")
-    parsers = parsers_for(source)
+    parsers = [p for p in parsers_for(source) if table in (None, p.table)]
+    if not parsers:
+        raise typer.BadParameter(f"{source} has no table {table!r}.")
     store, warehouse = open_store(raw_url), BigQueryWarehouse(bigquery_project)
     first = date.fromisoformat(from_day)
     last = date.fromisoformat(to_day) if to_day else first

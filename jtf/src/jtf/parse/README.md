@@ -7,11 +7,18 @@ Raw files to ODS rows, one parser per file layout. The design, and a run over ev
 | Module | Holds |
 | --- | --- |
 | `base.py` | `RawFile` (a raw file and its sidecar), `Refused`, the lineage columns, `Parser`, `conform` |
-| `tepco_actuals.py` | `eria_jukyu_YYYYMM_03.csv` → `ods.tepco_actuals`. The yearly `area-YYYY.csv` files under the same prefix get a parser and table of their own |
+| `tepco_actuals.py` | `eria_jukyu_YYYYMM_03.csv` → `ods.tepco_actuals` |
+| `tepco_actuals_yearly.py` | `area-YYYY.csv`, FY2016–FY2023, under the same prefix → `ods.tepco_actuals_yearly` |
+| `tepco_area.py` | The five `AREA_*.csv` sources, one layout read by position → `ods.tepco_area_*`, one table each |
+| `tepco_demand_outlook.py` | `juyo-d1-j.csv` and its monthly archive zips → `ods.tepco_demand_outlook_peaks`, `_hourly`, `_5min`, one table per block shape |
+| `jepx.py` | `spot_summary_{FY}.csv` → `ods.jepx_spot` |
+| `openmeteo.py` | Previous Runs, Single Runs and live JSON → `ods.openmeteo_*`, semi-long |
 | `load.py` | `parse_day`: one source's files for one extraction day, once per parser version; the `raw_files` manifest |
 | `bigquery.py` | The ODS dataset: append-only loads, and the queries that say what is already loaded |
 
-Step 5 adds the other layouts, each registered in `PARSERS` by its table. A parser declares which files under its source's prefix it `reads`, so a source with several layouts has one parser, and one table, per layout.
+Every layout has its parser: 14 tables plus the manifest, registered in `PARSERS` by table. A parser declares which files under its source's prefix it `reads`, so a source with several layouts has one parser, and one table, per layout. A parser is proven with `jtf parse` first and becomes a Dagster asset only once its table is listed in `ORCHESTRATED` ([orchestration/ods.py](../orchestration/ods.py)).
+
+**Types:** a column is `INTEGER` where every file so far holds whole numbers (all TEPCO values, JEPX volumes), and the parser refuses a decimal there as a likely unit or layout change; JEPX prices and Open-Meteo values are `FLOAT`; labels and dates stay `STRING` as published.
 
 **Refusing.** A parser raises `Refused` when a file's shape changed: an unknown column, a different unit row, a value that breaks a type. Nothing from that file is loaded, the manifest records it as `failed` with the reason, and the Dagster partition fails by name. A column the source drops becomes nulls.
 
@@ -19,4 +26,4 @@ Step 5 adds the other layouts, each registered in `PARSERS` by its table. A pars
 
 **Tables** are created by their first load: partitioned by `extraction_date`, clustered by `source_file` (`source` for the manifest), with the schema declared next to the parser.
 
-Run outside Dagster with `jtf parse --source tepco_actuals --from 2026-11-15 [--to …]`, using `JTF_RAW_URL` and `JTF_BIGQUERY_PROJECT`.
+Run outside Dagster with `jtf parse --source S --from 2026-11-15 [--to …] [--table T]`, using `JTF_RAW_URL` and `JTF_BIGQUERY_PROJECT`. Without `--table`, every layout of the source is parsed.

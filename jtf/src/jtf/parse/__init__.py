@@ -6,11 +6,28 @@ versions and `known_at`. A parser refuses a file whose shape changed rather than
 The design, and a run over every raw file, is in notebooks/02_raw_to_ods.ipynb.
 """
 
-from jtf.parse import tepco_actuals
+from jtf.parse import (
+    jepx,
+    openmeteo,
+    tepco_actuals,
+    tepco_actuals_yearly,
+    tepco_area,
+    tepco_demand_outlook,
+)
 from jtf.parse.base import Parser
 
 # By ODS table: a source with several file layouts has one parser, and one table, per layout.
-PARSERS: dict[str, Parser] = {parser.table: parser for parser in (tepco_actuals.PARSER,)}
+PARSERS: dict[str, Parser] = {
+    parser.table: parser
+    for parser in (
+        tepco_actuals.PARSER,
+        tepco_actuals_yearly.PARSER,
+        *tepco_area.PARSERS,
+        *tepco_demand_outlook.PARSERS,
+        jepx.PARSER,
+        *openmeteo.PARSERS,
+    )
+}
 
 
 def parsers_for(source: str) -> list[Parser]:

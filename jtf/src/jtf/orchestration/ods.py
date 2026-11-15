@@ -80,4 +80,6 @@ def ods_asset(parser: Parser) -> dg.AssetsDefinition:
     return _ods
 
 
-ODS_ASSETS = [ods_asset(parser) for parser in PARSERS.values()]
+# A parser is proven with `jtf parse` first; it becomes an asset once its table is listed here.
+ORCHESTRATED = ("tepco_actuals",)
+ODS_ASSETS = [ods_asset(PARSERS[table]) for table in ORCHESTRATED]

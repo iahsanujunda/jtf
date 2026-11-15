@@ -1,0 +1,27 @@
+{
+  "source": "tepco_area_actuals_today",
+  "filename": "AREA_JISEKI.csv",
+  "load_type": "daily",
+  "url": "https://www4.tepco.co.jp/forecast/html/images/AREA_JISEKI.csv",
+  "method": "GET",
+  "params": {},
+  "form": {},
+  "fetched_at": "2026-11-15T03:24:01.519817+00:00",
+  "fetched_at_jst": "2026-11-15T12:24:01.519817+09:00",
+  "extraction_date": "2026-11-15",
+  "http_status": 200,
+  "response_headers": {
+    "server": "Apache",
+    "last-modified": "Sun, 15 Nov 2026 03:10:04 GMT",
+    "etag": "\"7c3-66047ff6a2841\"",
+    "accept-ranges": "bytes",
+    "content-length": "1987",
+    "content-type": "text/csv",
+    "date": "Sun, 15 Nov 2026 03:24:01 GMT",
+    "connection": "keep-alive"
+  },
+  "size_bytes": 1987,
+  "sha256": "9c8791eecceca4820cba0735c7f4491d9c775f0158f53ac98cd9a71c14e23a47",
+  "jtf_version": "0.1.0",
+  "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:00c7f5e404da1ee091da849846ff558eaee891167a8c4ef3e9a8167ee8d2eb7c"
+}

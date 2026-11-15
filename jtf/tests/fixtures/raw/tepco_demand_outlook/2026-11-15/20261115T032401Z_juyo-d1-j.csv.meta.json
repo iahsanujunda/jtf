@@ -1,0 +1,28 @@
+{
+  "source": "tepco_demand_outlook",
+  "filename": "juyo-d1-j.csv",
+  "load_type": "daily",
+  "url": "https://www.tepco.co.jp/forecast/html/images/juyo-d1-j.csv",
+  "method": "GET",
+  "params": {},
+  "form": {},
+  "fetched_at": "2026-11-15T03:24:01.572185+00:00",
+  "fetched_at_jst": "2026-11-15T12:24:01.572185+09:00",
+  "extraction_date": "2026-11-15",
+  "http_status": 200,
+  "response_headers": {
+    "server": "Apache",
+    "last-modified": "Sun, 15 Nov 2026 03:20:04 GMT",
+    "etag": "\"22d4-660482334d8c7\"",
+    "accept-ranges": "bytes",
+    "content-length": "8916",
+    "content-type": "text/csv",
+    "date": "Sun, 15 Nov 2026 03:24:01 GMT",
+    "connection": "keep-alive",
+    "strict-transport-security": "max-age=15768000 ; preload"
+  },
+  "size_bytes": 8916,
+  "sha256": "f214a21d6a9946ed5325c85da58986b8bc885b03bef7faea639b0d5a0f680385",
+  "jtf_version": "0.1.0",
+  "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:00c7f5e404da1ee091da849846ff558eaee891167a8c4ef3e9a8167ee8d2eb7c"
+}

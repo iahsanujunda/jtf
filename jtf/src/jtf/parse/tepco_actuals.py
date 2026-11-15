@@ -13,7 +13,7 @@ import io
 
 import pandas as pd
 
-from jtf.parse.base import Column, Parser, RawFile, Refused
+from jtf.parse.base import Column, Parser, RawFile, Refused, whole_numbers
 
 VERSION = "1"
 UNIT_ROW = "単位[MW平均]"
@@ -40,7 +40,6 @@ COLUMNS = {
     "合計": "total",
 }
 MEASURES = [name for name in COLUMNS.values() if name not in ("date", "time")]
-WHOLE_NUMBER = r"-?\d+"
 
 
 def parse(raw: RawFile) -> pd.DataFrame:
@@ -55,13 +54,7 @@ def parse(raw: RawFile) -> pd.DataFrame:
     # A column TEPCO drops becomes nulls; one it adds is refused above.
     df = df.rename(columns=COLUMNS).reindex(columns=list(COLUMNS.values()))
     df.insert(0, "row_number", range(1, len(df) + 1))
-    df = df.dropna(subset=["area_demand"])
-    for column in MEASURES:
-        present = df[column].dropna().astype(str)
-        odd = present[~present.str.fullmatch(WHOLE_NUMBER)]
-        if len(odd):
-            raise Refused(f"{column} has a value that is not a whole number: {odd.iloc[0]!r}")
-        df[column] = pd.to_numeric(df[column]).astype("Int64")
+    df = whole_numbers(df.dropna(subset=["area_demand"]), MEASURES)
     return df.assign(**raw.lineage(VERSION)).reset_index(drop=True)
 
 

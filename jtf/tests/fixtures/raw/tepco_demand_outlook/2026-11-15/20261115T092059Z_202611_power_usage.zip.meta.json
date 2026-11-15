@@ -1,0 +1,30 @@
+{
+  "source": "tepco_demand_outlook",
+  "filename": "202611_power_usage.zip",
+  "load_type": "initial",
+  "url": "https://www.tepco.co.jp/forecast/html/images/202611_power_usage.zip",
+  "method": "GET",
+  "params": {},
+  "form": {},
+  "if_modified_since": null,
+  "fetched_at": "2026-11-15T09:20:59.403682+00:00",
+  "fetched_at_jst": "2026-11-15T18:20:59.403682+09:00",
+  "extraction_date": "2026-11-15",
+  "http_status": 200,
+  "gap": false,
+  "response_headers": {
+    "server": "Apache",
+    "last-modified": "Sat, 14 Nov 2026 21:35:01 GMT",
+    "etag": "\"9112-66043512eebda\"",
+    "accept-ranges": "bytes",
+    "content-length": "37138",
+    "content-type": "application/zip",
+    "date": "Sun, 15 Nov 2026 09:20:59 GMT",
+    "connection": "keep-alive",
+    "strict-transport-security": "max-age=15768000 ; preload"
+  },
+  "size_bytes": 5228,
+  "sha256": "7229641cda0b3c69b878fca804a98802594fb41c4c493c209985904068b539a5",
+  "jtf_version": "0.1.0",
+  "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:2b1ced937d273c87d9299f2b07d9544ee81c61fa7f4ef072cb401368a24f6b22"
+}

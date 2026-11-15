@@ -22,8 +22,8 @@
     "connection": "keep-alive",
     "strict-transport-security": "max-age=15768000 ; preload"
   },
-  "size_bytes": 362,
-  "sha256": "e0349d8fe2be370412924f6030169129774bdde5ec67e5c2549b17c0c69a26ed",
+  "size_bytes": 3352,
+  "sha256": "9739f3d3d908e3ac94e10d960eca4e9621db63dc0b222523b4a6f69699ad4fee",
   "jtf_version": "0.1.0",
   "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:df1e00fe25d91d74f54caa2e88b926b7fae3fb8e738bf0b826c1ec4b7d5d6b95"
 }
