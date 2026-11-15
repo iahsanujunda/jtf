@@ -62,9 +62,9 @@ Three free public sources (JEPX, TEPCO Power Grid and Open-Meteo) cover everythi
 
 **Ingestion design**
 
-1. **Fetch:** download each source and store the file exactly as received in Cloud Storage, partitioned by extraction date. Never modified: writes are create-only (`if_generation_match=0`), so an existing file cannot be overwritten. The fetch time becomes `known_at`; response headers and any timestamp inside the file (TEPCO files carry their own update time) are stored with it as `source_time`. External sources are pulled in full where it is cheap, so changes are detected by the parse step rather than trusted to the source's timestamps
+1. **Fetch:** download each source and store the file exactly as received in Cloud Storage, partitioned by extraction date. Never modified: writes are create-only (`if_generation_match=0`), so an existing file cannot be overwritten. The fetch time is the evidence for `known_at`; response headers and any timestamp inside the file (TEPCO files carry their own update time) are stored with it as `source_time`. External sources are pulled in full where it is cheap, so changes are detected by the parse step rather than trusted to the source's timestamps
 2. **Parse:** turn stored raw files into ODS rows. When parse logic changes, it is replayed from Cloud Storage over any date range, never by re-fetching. `known_at` comes from the raw file, never from the time of parsing, so re-parsing history keeps it point-in-time correct
-3. **Every ODS row carries:** `valid_time` (what it describes), `source_time` (the source's own published or updated time), `ingested_at`, `known_at`, `load_type` (initial or daily), `batch_id` and `source_file`
+3. **Every ODS row carries its lineage:** `source_file`, `extraction_date`, `fetched_at`, `load_type` (daily, initial or recapture), `source_time` (the source's own published or updated time), `parser_version`, `ingested_at` and `batch_id`. ODS keeps the source's own values, units and time labels; DWD derives slot times, versions and `known_at`, because a version and its `known_at` depend on other captures of the same file
 
 **Capture schedule.** It starts first, before anything else is built, because some data cannot be fetched later. About 10 small requests a day.
 
@@ -96,7 +96,7 @@ This is the core of the project: every input carries when it became known, every
 **As-of rules**
 
 1. **Decision time `T` is 09:00 JST on D−1**, one hour before the 10:00 JEPX gate closure. It is one setting, and every run and replay takes `T` explicitly; nothing reads the clock
-2. **`known_at` is when we could have had the value:** the fetch time from capture start, and the source's publication rule for history (table below). It is never the parse time
+2. **`known_at` is when we could have had the value:** the fetch time of the first capture containing it; or, for a value's first version when the rule's time falls before the source's capture start, the source's publication rule for history (table below). It is never the parse time
 3. **A changed value is a new version** with its own `known_at`; the same value seen again in a later fetch is not
 4. **Features read inputs only through one as-of macro**: the latest version with `known_at ≤ T`. CI rejects `CURRENT_DATE()`, `NOW()` and any DWS model that reads ODS or DWD directly
 5. **Targets use the latest values**; only inputs go through as-of. Evaluation also scores against the latest values
@@ -108,9 +108,9 @@ This is the core of the project: every input carries when it became known, every
 | TEPCO actuals for a slot | Fetch time of the first file containing that value; each correction is a new version | End of the slot + 1 hour (TEPCO's rule), using today's final values | All of D−2; D−1 only before about 08:00. **The last complete day is D−2**, so persistence and actual-based lags use D−2 |
 | TEPCO next-day forecast for D | Fetch time on the evening of D−1 | None: not archived | Never: published after the gate. A benchmark, compared after the fact |
 | TEPCO same-day files | Fetch time | None usable: the archive holds only the end-of-day version | Only from capture start; no feature uses them until enough history exists |
-| Weather, Previous Runs | – | Valid hour − 48 h (`previous_day2`). `previous_day1` is **not** allowed: for midday slots of D it comes from a run issued after `T` | All slots of D: even D's last hour − 48 h, plus a 6-hour availability delay, lands before `T` |
-| Weather, Single Runs (from 2026-04-02) | – | Run start + assumed availability delay (MSM 3 h, GSM 6 h), replaced by measured delays from our captures | The latest run with `known_at ≤ T` |
-| Weather, live | Fetch time; the run start is stored as `source_time` | – | The run fetched at `T` |
+| Weather, Previous Runs | – | Valid hour − 48 h + the model's availability delay (MSM 3 h, GSM and ECMWF 6 h), for `previous_day2`. `previous_day1` is **not** allowed: for midday slots of D it comes from a run issued after `T` | All slots of D: even D's last hour − 48 h + 6 h lands before `T` |
+| Weather, Single Runs (from 2026-04-02) | – | Run start + assumed availability delay (MSM 3 h, GSM and ECMWF 6 h), replaced by measured delays from our captures | The latest run with `known_at ≤ T` |
+| Weather, live | Fetch time (the response names no run) | – | The run fetched at `T` |
 | Solar capacity estimate | Publication date of each update | Publication date of each update | The latest update with `known_at ≤ T` |
 | Holiday calendar, weather points and weights, settings | Pinned in the image | Pinned in the image | Whatever the run's image digest contains |
 
@@ -125,7 +125,7 @@ This is the core of the project: every input carries when it became known, every
 
 What it needs:
 
-- Raw files that are never modified, and an append-only ODS with `known_at` on every row
+- Raw files that are never modified, and an append-only ODS with its capture evidence (`source_file`, `fetched_at`) on every row
 - Everything that is not data lives in the image: code, dbt models, the holiday calendar version, weather points and weights, settings. Every run records its image digest
 - Everything that is data and changes over time carries `known_at`, including reference data such as the capacity estimate
 - Every model version that ever served stays in Cloud Storage and MLflow; no lifecycle rule deletes them
@@ -159,8 +159,8 @@ The replay runner is the time machine: it rebuilds any past day as it was known,
 | Layer | Holds | Rule |
 | --- | --- | --- |
 | Raw (Cloud Storage) | Files exactly as fetched, by source and extraction date | Never modified; parse replays from here |
-| ODS | Parsed rows from raw files | Append-only; `valid_time`, `source_time`, `ingested_at`, `known_at`, `load_type`, `batch_id`, `source_file` on every row |
-| DWD | Cleaned, typed detail per area and slot, in MW and JST slot start; weather kept per run | Keeps every version (`valid_time`, `known_at`); a value seen again is not a new version; never collapse weather runs |
+| ODS | Parsed rows from raw files | Append-only; the source's own values and labels, with lineage (`source_file`, `fetched_at`, `load_type`, `source_time`, `parser_version`) on every row |
+| DWD | Cleaned, typed detail per area and slot, in MW and JST slot start; weather kept per run | Derives every version with its `known_at` and `basis` (rule or captured); a value seen again is not a new version; never collapse weather runs |
 | DWS | Features per decision time and slot, for every decision time | Inputs only through the as-of macro; no `CURRENT_DATE()` or hidden "latest" joins |
 | ADS | Published forecasts and the exact input snapshot per run | Tagged with run ID, model versions and weather issue time; replays write to a separate dataset |
 
@@ -176,7 +176,7 @@ The line is drawn by what a failure costs. Capture runs as a Cloud Run Job on Cl
 | Parse when data lands | ODS assets partitioned by extraction day; the sensor's records trigger the parse for that day |
 | SQL layers with lineage | dbt models as assets (`dagster-dbt`); lineage runs from raw files through dbt to predictions and the dashboard |
 | Rebuild downstream automatically | Declarative automation: DWD and DWS rebuild when their inputs update |
-| Features and predictions per day | Partitioned by decision date from 2024-02; a backfill over a range runs as one job (single-run backfill policy), so a full-history rebuild stays one query |
+| Features and predictions per day | Partitioned by decision date from 2024-02-16 (target day 2024-02-17, the first with full MSM radiation); a backfill over a range runs as one job (single-run backfill policy), so a full-history rebuild stays one query |
 | Know what to backfill after a release | Each asset carries a code version; a release that changes one marks its partitions out of date in the UI |
 | Daily forecast | A schedule at 09:05 JST, after `T`; it runs on whatever is fresh, with the fallback ladder |
 | Evaluation | A sensor starts it when actuals for day D land |

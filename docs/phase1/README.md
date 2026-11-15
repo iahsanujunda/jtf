@@ -41,8 +41,8 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 | --- | --- | --- | --- |
 | TEPCO area actuals | `https://www.tepco.co.jp/forecast/html/images/eria_jukyu_YYYYMM_03.csv` (one per month, from 2024-02); older `area-YYYY.csv` (one per fiscal year, FY2016–2023, hourly) UTF-8 or CP932, **varying from file to file**; row 1 `単位[MW平均]`; 30-min slots labelled by start time; **MW averaged over the slot**. The yearly files differ: 万kWh per hour, a two-row header, thousands separators, one thermal column. Columns include `太陽光発電実績`, `太陽光出力制御量` (curtailment), `風力発電実績` | Target, lags |
 | TEPCO next-day forecast | `https://www4.tepco.co.jp/forecast/html/images/AREA_ONCE_YOSOKU.csv`, `AREA_ONCE_BGKEI.csv` | Shift_JIS; row 2 holds the file's update time and target date; `時間コマ` 1–48; **kWh per slot**; **wind + solar combined** | Benchmark only |
-| TEPCO same-day files | `AREA_YOSOKU.csv`, `AREA_BGKEI.csv`, `AREA_JISEKI.csv` (same folder); `juyo-d1-j.csv` | kWh per slot; 万kW, hourly and 5-min | Captured only, not parsed yet |
-| Open-Meteo Previous Runs | `https://previous-runs-api.open-meteo.com/v1/forecast`, `models=jma_msm,jma_gsm`, variables with `_previous_day2` | JSON, hourly | Weather features over the long history |
+| TEPCO same-day files | `AREA_YOSOKU.csv`, `AREA_BGKEI.csv`, `AREA_JISEKI.csv` (same folder); `juyo-d1-j.csv` | kWh per slot; 万kW, hourly and 5-min | `AREA_*` parsed into ODS with the next-day parser; `juyo-d1-j.csv` kept raw. No phase-1 feature uses them |
+| Open-Meteo Previous Runs | `https://previous-runs-api.open-meteo.com/v1/forecast`, `models=jma_msm,jma_gsm,ecmwf_ifs025`, variables with `_previous_day2` | JSON, hourly | Weather features over the long history |
 | Open-Meteo Single Runs | `https://single-runs-api.open-meteo.com/v1/forecast?...&run=YYYY-MM-DDTHH:MM` (UTC) | JSON, hourly; archive from 2026-04-02 | Exact-run features; measuring how pessimistic `previous_day2` is |
 | Open-Meteo live | `https://api.open-meteo.com/v1/forecast`, same models and variables | JSON, hourly | Today's forecast inputs |
 | JEPX spot summary | Form POST to `https://www.jepx.jp/_download.php` with `dir=spot_summary&file=spot_summary_{FY}.csv` | Shift_JIS; slot codes 1–48; yen/kWh; columns include `エリアプライス東京(円/kWh)` | Price-weighted solar error; ready for M2 |
@@ -86,7 +86,7 @@ One-off executions of the capture jobs with `--initial` (and a longer task timeo
 | --- | --- | --- | --- |
 | `tepco_actuals` | Monthly files from 2024-02; yearly files FY2016–FY2023, kept raw | about 42, 8 MB | Final values: later corrections are baked in. The yearly files are parsed only when a later phase needs them |
 | `jepx_spot` | FY2016 to last fiscal year | about 10, 20 MB | The current year comes from the daily capture |
-| `openmeteo_previous_runs` (history only) | 2024-01 to now, one request per calendar month, all three models, leads `latest`, `previous_day1`, `previous_day2` | about 35, 3,600 Open-Meteo calls | `latest` and `previous_day1` exist only for the leak scenario F2; features use `previous_day2`. MSM's leads exist from mid-2022 to mid-2023 onward, ECMWF's from spring 2024 |
+| `openmeteo_previous_runs` (history only) | 2024-01 to now, one request per calendar month, all three models, leads `latest`, `previous_day1`, `previous_day2` | about 35, 3,600 Open-Meteo calls | `latest` and `previous_day1` exist only for the leak scenario F2; features use `previous_day2`. MSM's leads exist from mid-2022 to mid-2023 onward; ECMWF's radiation from 5–7 March 2024, its other variables from early February. MSM's radiation is missing at every lead from 23 January to 15 February 2024 (notebook 02) |
 | `openmeteo_single_runs` (history only) | 2026-04-02 to now: MSM 18 and 21 UTC, GSM and ECMWF 12 and 18 UTC, each day | about 1,400, 12,000 calls | More than a day of free quota: the loader paces itself from `X-RateLimit-Cost`, stops cleanly near the daily limit and resumes the next day |
 | TEPCO next-day forecast | None exists | – | The benchmark starts at the first capture |
 
@@ -104,7 +104,7 @@ Each change below came out of [the history probe](../../notebooks/01_history_pro
 | Encoding varies from file to file | UTF-8 for most of 2024–26, CP932 for the newest files and the yearly files | Parsers detect the encoding per file |
 | Open-Meteo history costs by size, about 104 calls a month | `X-RateLimit-Cost`, matched by a formula | Quota-aware pacing and a resumable loader |
 | Open-Meteo drops the model suffix when one model is requested | Column names in single-model responses | Parsers accept both column forms |
-| Lead history is shorter than documented | MSM's leads from mid-2022 to mid-2023, ECMWF's from spring 2024 | Nulls are kept as data; features fall back explicitly |
+| Lead history is shorter than documented | MSM's leads from mid-2022 to mid-2023, ECMWF's radiation from 5–7 March 2024; MSM's radiation missing from 23 January to 15 February 2024 (notebook 02) | Nulls are kept as data; features fall back explicitly |
 | Some decision-time runs land exactly at `T` | MSM 21 UTC, GSM and ECMWF 18 UTC with the assumed delays | Two runs per model per day in the single-runs history |
 | JMA's single-runs archive starts on 12 May 2026, not 2 April, with scattered missing runs later (ECMWF too, on one day) | The initial load: about 40 runs per JMA run type answered "The requested model run is not available"; [the history probe](../../notebooks/01_history_probe.ipynb), section 7, pins the start | A missing run is stored as a recorded gap (the answer and its status in the sidecar) and requested only once; exact-run fidelity for JMA starts on 12 May |
 | The capture account couldn't list the raw bucket | The initial load: `403` on listing with only `objectCreator` | Add `objectViewer`: reading and listing, still no delete or overwrite |
@@ -114,7 +114,7 @@ Each change below came out of [the history probe](../../notebooks/01_history_pro
 
 **Decision time `T` is 09:00 JST on D−1**, one hour before the 10:00 JEPX gate closure. It is one setting, and every run takes `T` explicitly; nothing reads the clock.
 
-1. `known_at` is when we could have had the value: the fetch time from capture start, and the rules below for history. It is never the parse time, so re-parsing keeps it correct
+1. `known_at` is when we could have had the value. A value's first version takes the history rule below when the rule's time falls before the source's capture start (its first daily capture); every other version takes the fetch time of the first capture containing it. `load_type` doesn't decide this, because the first daily capture already carries weeks of history ([notebook 02](../../notebooks/02_raw_to_ods.ipynb), section 4). Each version records its `basis`: `rule` or `captured`. It is never the parse time, so re-parsing keeps it correct
 2. A changed value is a new version with its own `known_at`; the same value seen again is not
 3. DWS reads inputs only through the `as_of` macro: the latest version with `known_at ≤ T`
 4. Targets use the latest values; only inputs go through as-of
@@ -124,9 +124,9 @@ Each change below came out of [the history probe](../../notebooks/01_history_pro
 | --- | --- | --- | --- |
 | TEPCO actuals, one slot | Fetch time of the first file containing that value; each correction is a new version | Slot end + 1 hour | All of D−2; D−1 only before about 08:00. **Lags and persistence use D−2** |
 | TEPCO next-day forecast for D | Fetch time on the evening of D−1 | None | Never: published after the gate. Benchmark only |
-| Weather, Previous Runs | – | Valid hour − 48 h (`previous_day2`). **`previous_day1` is banned**: for midday slots it comes from a run issued after `T` | All slots of D |
-| Weather, Single Runs | – | Run start + assumed delay: MSM 3 h, GSM 6 h, replaced by measured delays | Per slot, the latest run with `known_at ≤ T` that covers the slot |
-| Weather, live | Fetch time; run start stored as `source_time` | – | The run fetched at 08:45 |
+| Weather, Previous Runs | – | Valid hour − 24 h × N + the model's delay (MSM 3 h, GSM and ECMWF 6 h) for `previous_dayN`; features use `previous_day2`. **`previous_day1` is banned**: for midday slots it comes from a run issued after `T` | All slots of D |
+| Weather, Single Runs | – | Run start + assumed delay: MSM 3 h, GSM and ECMWF 6 h, replaced by measured delays | Per slot, the latest run with `known_at ≤ T` that covers the slot |
+| Weather, live | Fetch time (the response names no run) | – | The run fetched at 08:45 |
 | JEPX price for day X | Fetch time when first seen | 10:30 JST on X−1 | Up to D−1 |
 | Capacity estimate | Publication date of each update | Publication date | The latest update with `known_at ≤ T` |
 | Holiday calendar, points, settings | Pinned in the image | Pinned in the image | Whatever the run's image contains |
@@ -139,20 +139,24 @@ Each change below came out of [the history probe](../../notebooks/01_history_pro
 - Create-only: `if_generation_match=0` in code, and the job's service account has only `roles/storage.objectCreator` and `roles/storage.objectViewer` (to list and read, for resumable loads and re-captures); neither can delete or overwrite. An existing file cannot be replaced even by a bug
 - No parsing in the fetch step
 
-**Parse** runs as Dagster ODS assets (also `jtf parse --source S --from D1 --to D2`) that read raw files and load ODS tables in BigQuery:
+**Parse** runs as Dagster ODS assets (also `jtf parse --source S --from D1 --to D2`) that read raw files and load ODS tables in BigQuery. The parsers live in `jtf/src/jtf/parse/`, one module per file layout, and were designed and run over every raw file in [notebook 02](../../notebooks/02_raw_to_ods.ipynb). **Parsing changes the format, never the meaning:** one ODS row per data row, ASCII column names, typed values, the source's own units and time labels.
 
-| ODS table | From |
-| --- | --- |
-| `ods.tepco_actuals` | `eria_jukyu` files |
-| `ods.tepco_forecast_next_day` | `AREA_ONCE_*` captures |
-| `ods.openmeteo_previous_runs` | Previous Runs JSON |
-| `ods.openmeteo_single_runs` | Single Runs JSON |
-| `ods.openmeteo_live` | Live JSON |
-| `ods.jepx_spot` | Spot summary files |
+| ODS table | From | One row per |
+| --- | --- | --- |
+| `ods.tepco_actuals` | Monthly `eria_jukyu` files | Slot, per capture |
+| `ods.tepco_area_forecast_next_day`, `ods.tepco_area_bg_plan_next_day` | `AREA_ONCE_YOSOKU`, `AREA_ONCE_BGKEI` | Slot code, per capture |
+| `ods.tepco_area_forecast`, `ods.tepco_area_bg_plan`, `ods.tepco_area_actuals_today` | `AREA_YOSOKU`, `AREA_BGKEI`, `AREA_JISEKI`, with the same parser | Slot code, per capture |
+| `ods.jepx_spot` | Spot summary files | Delivery day and slot code, per capture |
+| `ods.openmeteo_previous_runs` | Previous Runs JSON | Point, model, `lead_days`, hour |
+| `ods.openmeteo_single_runs` | Single Runs JSON | Point, model, hour, per run (`run_time`) |
+| `ods.openmeteo_live` | Live JSON | Point, model, hour, per capture |
+| `ods.raw_files` | Every sidecar | Raw file: status (`parsed`, `empty`, `gap`, `kept raw`, `ignored`, `failed`), rows, check result |
 
-Every ODS row carries `valid_time`, `source_time`, `ingested_at`, `known_at`, `load_type` (`initial` or `daily`), `batch_id`, `source_file` and `parser_version`. Values keep the source's own units and slot labels. ODS is append-only.
+The Open-Meteo tables are semi-long: the model and lead, which the API packs into column names, become columns, and each variable stays a column with its unit asserted. Not parsed: the yearly `area-YYYY.csv` files and `juyo-d1-j.csv` (kept raw), and prefixes that are not registered sources.
 
-**DWD** (dbt) converts power to MW averaged over the slot (kWh per slot ÷ 500; 万kW × 10) and every slot label to its start time in JST; keeps every version as (`valid_time`, `known_at`); keeps weather per run; interpolates hourly weather to 30-minute slots. Range checks: solar ≥ 0, solar = 0 at night (F4), values under installed capacity (F5).
+Every ODS row carries its lineage: `source_file`, `extraction_date`, `fetched_at`, `load_type` (`daily`, `initial` or `recapture`), `source_time` (the update time written in the file, else `Last-Modified`), `row_number` (CSV tables), `parser_version`, `ingested_at` and `batch_id`. ODS has no `known_at` and no shared `valid_time`: a version and its `known_at` depend on other captures of the same file, and slot times are meaning, so DWD derives both. A parser refuses a file whose shape changed (unknown columns, unit row, units, time zone, column count); a missing column becomes nulls. ODS is append-only and partitioned by `extraction_date`: a parser change re-parses under a new `parser_version`, and DWD reads the newest version per file.
+
+**DWD** (dbt) converts power to MW averaged over the slot (kWh per slot ÷ 500, checked against the MW file in notebook 02; 万kW × 10) and every slot label to its start time in JST; derives versions with their `known_at` and `basis` from ODS's lineage, per the point-in-time rules; drops `AREA_JISEKI` slots that end after the file's own update time (it fills them with zeros); keeps weather per run; interpolates hourly weather to 30-minute slots, taking radiation at hour `t` as the mean of the hour before `t`; fills weather holes from ECMWF at the same lead where it has the variable, flagging the row. Range checks: solar ≥ 0, solar = 0 at night (F4), values under installed capacity (F5).
 
 **DWS** (dbt) holds `dws.solar_features` keyed by (`decision_time`, `slot_start`) for every decision time, read only through `as_of`.
 
@@ -168,7 +172,7 @@ Definitions live in `jtf/src/jtf/orchestration`; assets are thin wrappers over `
 | --- | --- | --- | --- |
 | `raw` (external) | One per source: TEPCO actuals, next-day forecast, same-day files; Open-Meteo live, Previous Runs, Single Runs; JEPX spot | Extraction day (JST) | A sensor on the raw bucket records each landed file against its source and day |
 | `ods` | One per parsed source | Extraction day | Declarative automation: new raw records for that day |
-| `dwd`, `dws` | dbt models through `dagster-dbt` | DWS by decision date from 2024-02-01; backfills of a range run as one job | Declarative automation: upstream updates |
+| `dwd`, `dws` | dbt models through `dagster-dbt` | DWS by decision date from 2024-02-16 (target day 2024-02-17, the first with full MSM radiation); backfills of a range run as one job | Declarative automation: upstream updates |
 | `ml` | Backtest and train jobs | – | Launched by hand with run config (phase 1, local) |
 | `replay` | Replay job | Decision-date range in run config | Launched by hand |
 
@@ -204,7 +208,7 @@ What it needs in phase 1: raw files never modified and an append-only ODS; every
 | Model | LightGBM with quantile objectives, one model each for P10, P50 and P90; quantiles sorted if they cross |
 | Baselines | Persistence: D−2 same slot. Clear-sky × recent ratio: clear-sky output for D × the 7-day median ratio |
 | Benchmark | TEPCO's next-day forecast. It has an unfair advantage (published after the gate) and combines wind and solar, so it is compared with solar + wind actuals, only over the capture period |
-| Backtest | Rolling origin over the history from 2024-02, retraining on a fixed cadence, features read as of each decision time; first test month after 12 months of training |
+| Backtest | Rolling origin over target days from 2024-02-17 (MSM radiation is missing before it; notebook 02), retraining on a fixed cadence, features read as of each decision time; first test month after 12 months of training |
 | Metrics | Daylight slots only (sun elevation above 0): MAE normalised by capacity, pinball loss, P10–P90 coverage (target 80%), bias, skill = 1 − MAE(model) / MAE(persistence); price-weighted solar error using the JEPX Tokyo price |
 | Segments | Clear vs cloudy days (by clear-sky index), curtailed vs normal days, season |
 | Tracking | Local MLflow (`mlflow.db`, gitignored): parameters, git commit, image digest, `T` range, fidelity mix, metrics, plots |
@@ -252,7 +256,12 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 | Weather points and weights | The nine points above, equal weights, refined later | 1 |
 | GCP project IDs | Done: `jepx-tokyo-forecast-dev`, `jepx-tokyo-forecast-prod`, on a dedicated billing account | 1 |
 | Code license | Apache-2.0 or MIT | 9 |
-| Weather models | Done: MSM for solar; ECMWF IFS 0.25° as the radiation fallback (its history starts in spring 2024), because GSM has no radiation through Open-Meteo; GSM kept for cloud cover and temperature | 2 |
+| Weather models | Done: MSM for solar; ECMWF IFS 0.25° as the radiation fallback (its radiation history starts on 5–7 March 2024), because GSM has no radiation through Open-Meteo; GSM kept for cloud cover and temperature | 2 |
+| ODS contract | Done: parsing changes the format, never the meaning; lineage on every row; versions, `known_at`, units and slot times in DWD ([notebook 02](../../notebooks/02_raw_to_ods.ipynb)) | 3 |
+| Re-parsing | Done: append under a new `parser_version`, which is the ODS asset's code version | 3 |
+| Open-Meteo ODS shape | Done: semi-long, with model and lead as columns and a column per variable | 5 |
+| Same-day TEPCO area files | Done: parsed into ODS with the next-day parser | 5 |
+| Training window | Done: target days from 2024-02-17; later weather holes fall back to ECMWF at the same lead | 7 |
 | VM size | `e2-medium`; resize if runs need more memory | 4 |
 | Dagster UI access | IAP tunnel; Tailscale is the alternative if the tunnel gets tedious | 4 |
 | Solar capacity estimate | Candidate: METI's FIT/FIP disclosure of installed capacity by prefecture (to verify) | 5 |
