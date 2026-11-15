@@ -13,6 +13,7 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 5. M1 beats persistence (skill above 0) in the rolling backtest on daylight slots, with P10–P90 coverage reported; it is compared with TEPCO's forecast over whatever capture period exists, stated as such
 6. F2 (lookahead leak) and F1 (late weather) are written up in [docs/scenarios](../scenarios/)
 7. The root README explains the design, the results with their fidelity, and an honest status
+8. Nothing account-specific is hard-coded: project IDs, region, billing account and GitHub repo are Terraform variables, and both projects were set up through `make bootstrap`. The fork guide comes in phase 5
 
 ## Scope
 
@@ -24,7 +25,7 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 
 | # | Step | Deliverables | Done check |
 | --- | --- | --- | --- |
-| 1 | **Capture, this week** | GCP dev and prod projects with a billing budget; repo skeleton (uv, `jtf` CLI, Dockerfile, Makefile, `ci.yml`); `storage` module; `jtf fetch` for every capture group; Terraform for the prod capture slice; `release.yml` that builds the image and points the job at its digest; healthchecks.io checks | Three scheduled runs land files and sidecars in the prod raw bucket; a skipped run alerts |
+| 1 | **Capture, this week** | Repo skeleton (uv, `jtf` CLI, Dockerfile, Makefile, `ci.yml`); `deploy/bootstrap` (APIs, state bucket, WIF, CI service accounts, budget, importing the hand-made budget) behind `make bootstrap`; every account-specific value as a Terraform variable, with `terraform.tfvars.example` files; `storage` module; `jtf fetch` for every capture group; Terraform for the prod capture slice; `release.yml` that builds the image and points the job at its digest; healthchecks.io checks | Three scheduled runs land files and sidecars in the prod raw bucket; a skipped run alerts |
 | 2 | Initial history load | `jtf fetch --initial` per source, as one-off executions of the capture job, tagged `initial` | Raw files for every range in [Initial load](#initial-load) |
 | 3 | **Dagster, locally** | `jtf/src/jtf/orchestration`: raw external assets with the bucket sensor, freshness checks per capture group, partition definitions, the first parse asset (TEPCO actuals) into dev ODS, automation on its downstream; `dagster dev` reading the prod raw bucket read-only | The local UI shows each source's captures per day with freshness checks, and a new capture starts the TEPCO parse on its own |
 | 4 | **Dagster, in prod** | Terraform `platform` module: `e2-medium` VM without a public IP, Cloud NAT, IAP firewall rule, Cloud SQL `db-f1-micro` (Enterprise, Tokyo); `deploy/dagster`: `compose.prod.yaml` (webserver, daemon, code location by digest, Cloud SQL Auth Proxy) and `dagster.prod.yaml` (Postgres storage, Docker run launcher, pool limits); `release.yml` also points the code location at the new digest | Through an IAP tunnel, the prod UI shows every capture and the initial load with freshness checks green, and new captures are parsed into prod ODS on their own. A stopped capture shows up both as a failed freshness check and as a healthchecks.io alert |
@@ -32,7 +33,7 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 | 6 | Time machine | Replay job (`mode`, `T` range, `fault` in run config) and `jtf replay`; run records in ADS; determinism and future-poison tests | Both tests green in CI |
 | 7 | Model | Baselines, the TEPCO benchmark, M1 quantile models, rolling backtest, metrics by segment, MLflow logging; backtest and train jobs launched in `dagster dev` | Skill above 0 vs persistence on daylight slots |
 | 8 | Fault scenarios | F2 and F1 run-config presets, replays and write-ups | Write-ups follow the template, with the expected outcome written first |
-| 9 | README | Design, results with fidelity, status | Someone new can follow it |
+| 9 | README | Root README (quick start, contributing); design and results with fidelity; status; a LICENSE | Someone new can follow it |
 
 ## Data
 
@@ -197,7 +198,9 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 | Prod project, Tokyo: capture slice (step 1) | Raw bucket (uniform access, soft delete on); Artifact Registry repository; service account `jtf-fetch` with `roles/storage.objectCreator` on the raw bucket only; Cloud Run Job `jtf-fetch` pinned to an image digest; three Cloud Scheduler jobs; Secret Manager entries for the healthchecks.io ping URLs | `envs/prod`, `forecast_env` module |
 | Prod project, Tokyo: Dagster (step 4) | `e2-medium` VM with no public IP and a 30 GB disk; Cloud NAT; firewall rule allowing only IAP's range; Cloud SQL Postgres `db-f1-micro`, Enterprise edition, no HA, database `dagster`; service account for the VM with BigQuery and read access to the raw bucket | `envs/prod`, `platform` module |
 | Dev project, Tokyo | Dev raw bucket for fetch tests; BigQuery datasets `ods`, `dwd`, `dws`, `ads` with per-developer and per-PR prefixes; read access to the prod raw bucket | `envs/dev` |
-| Both | Workload Identity Federation for GitHub: PRs reach dev; only `main` with the `prod` environment's approval reaches prod. Billing budget alerts at $60 and $80 | Both |
+| Both, via `deploy/bootstrap` | APIs; Terraform state bucket; Workload Identity Federation for GitHub (PRs reach dev; only `main` with the `prod` environment's approval reaches prod); CI service accounts; the budget on the dedicated billing account (¥12,000 a month, alerts at 75%, 100% and on forecast) | `bootstrap` |
+
+**Projects:** `jepx-tokyo-forecast-dev` and `jepx-tokyo-forecast-prod`, standalone (no organization), labelled `app=jtf` and `env=dev|prod`, on a dedicated billing account. The billing account ID stays out of the repo: Terraform reads it from a gitignored `terraform.tfvars`.
 
 **Cost in phase 1:** about $1 a month until step 4; then about $45–50, mostly the VM ($30–35) and Cloud SQL ($10–12). Check the VM price in Google's calculator, since third-party figures disagree.
 
@@ -216,7 +219,8 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 | --- | --- | --- |
 | Decision time | 09:00 JST on D−1, once the 10:00 gate closure is confirmed in the JEPX trading guide | 1 |
 | Weather points and weights | The nine points above, equal weights, refined later | 1 |
-| GCP project IDs | – | 1 |
+| GCP project IDs | Done: `jepx-tokyo-forecast-dev`, `jepx-tokyo-forecast-prod`, on a dedicated billing account | 1 |
+| Code license | Apache-2.0 or MIT | 9 |
 | Weather models | MSM for solar, GSM as a fallback and for coverage | 2 |
 | VM size | `e2-medium`; resize if runs need more memory | 4 |
 | Dagster UI access | IAP tunnel; Tailscale is the alternative if the tunnel gets tedious | 4 |

@@ -16,6 +16,7 @@ Build one small but correct day-ahead forecasting platform for the Tokyo area on
 - Capture runs as a plain scheduled job, because a missed capture loses data for good; everything that can be rebuilt from raw files runs as a Dagster asset graph, with lineage across Python and dbt, sensors and schedules, and partitioned backfills from a UI. All logic lives in the `jtf` package, which Dagster assets call
 - Release gates, monitoring, a fallback ladder, tested database backups and an AI triage agent
 - A library of fault scenarios, each with a written-up result
+- Forkable: anyone can deploy their own copy into their own GCP account from a fork, with one config file and one bootstrap step
 - GCP from day one, on common managed building blocks: Cloud Storage, BigQuery with dbt, Cloud Run, Compute Engine and Terraform, with Dagster for orchestration
 
 **Non-goals**
@@ -210,7 +211,7 @@ One region, Tokyo (`asia-northeast1`). Cloud SQL sits next to the Dagster VM bec
 - The VM reaches Cloud SQL through the Cloud SQL Auth Proxy; MLflow through Cloud Run's built-in Cloud SQL connection. Model files go straight to the models bucket
 - No public endpoints except, optionally, the dashboard: it serves public data from precomputed snapshots and never queries BigQuery, so a public link cannot run up costs. MLflow requires IAM: the laptop reaches it with `gcloud run services proxy`; runs send a Google ID token as `MLFLOW_TRACKING_TOKEN`
 - The VM is most of the bill. A one-year committed-use discount would cut it by roughly a third once the setup is stable
-- Cost guardrails: a billing budget with alerts at $60 and $80 (budgets alert, they do not cap spend), a daily BigQuery quota on bytes scanned, timeouts and retry limits on every job and run, lifecycle rules on exports and images
+- Cost guardrails: a dedicated billing account with a monthly budget of ¥12,000, created by bootstrap, alerting at 75% (about $60), 100% and on forecast spend (budgets alert, they do not cap spend); a daily BigQuery quota on bytes scanned, timeouts and retry limits on every job and run, lifecycle rules on exports and images
 
 **Repository**
 
@@ -263,14 +264,17 @@ deploy/
 ├── dagster/
 │   ├── dagster.prod.yaml      Postgres storage, Docker run launcher, connection pool limits
 │   └── compose.prod.yaml      VM services: webserver, daemon, code location, Cloud SQL Auth Proxy
+├── bootstrap/                 run once from a laptop, local state: APIs, Terraform state bucket, GitHub access (WIF), CI service accounts, budget
+│   └── terraform.tfvars.example
 ├── terraform/
 │   ├── modules/
-│   │   ├── forecast_env/      buckets, BigQuery datasets, Artifact Registry, capture and fallback jobs, Scheduler, IAM, WIF, budget
+│   │   ├── forecast_env/      buckets, BigQuery datasets, Artifact Registry, capture and fallback jobs, Scheduler, IAM
 │   │   └── platform/          Dagster VM, Cloud NAT, IAP firewall rule, Cloud SQL, MLflow (prod only)
 │   └── envs/
-│       ├── dev/
-│       └── prod/
+│       ├── dev/               terraform.tfvars.example
+│       └── prod/              terraform.tfvars.example
 └── scripts/
+    ├── init.py                optional wizard (phase 5): asks questions, writes the gitignored terraform.tfvars files
     └── promote.sh             point the capture job, fallback job and Dagster code location at an image digest
 ```
 
@@ -284,6 +288,27 @@ deploy/
 - No staging: replays and shadow runs write to their own datasets in prod, which covers what a staging copy would test
 - One MLflow server, in prod, serves both environments. Dev runs log under `dev/` experiments, and only the release workflow may move the `production` alias
 - Unit tests run offline with the `file://` storage backend
+
+**Deploying your own copy**
+
+The repo is meant to be forked and deployed into someone else's GCP account. The habits that make this possible start on day one: every account-specific value is a variable, and bootstrap is how our own projects are set up. The wizard, the guide and the from-scratch proof come in phase 5, after the pipeline is complete. Terraform plays the role a Helm chart plays on Kubernetes: modules are the chart, `terraform.tfvars` is the values file, and a git tag is the chart version.
+
+1. Fork and clone. Prerequisites: a GCP account with a billing account, gcloud, Terraform, uv
+2. `make init`: an optional wizard that asks for project IDs (or creates projects), billing account, region, GitHub repo (read from `git remote`) and alert email, and **writes the gitignored `terraform.tfvars` files**. Copying the `*.tfvars.example` files by hand gives the same result
+3. `make bootstrap`, once, with the forker's own gcloud login: enables APIs, creates the state bucket, GitHub access for their repo (WIF), the CI service accounts and the budget, then sets the GitHub repository variables CI needs (or prints them)
+4. Push to `main`: their CI builds their image into their Artifact Registry and applies Terraform, dev first, prod after approval
+5. `make secrets` stores the healthchecks.io ping URLs in Secret Manager; `make initial-load` loads the history; `make ui` opens the Dagster UI through IAP
+
+A fork deploys the whole pipeline, about ¥7,000–7,500 ($45–50) a month. A lighter option for forks that only want the data capture can come later, if anyone asks for it.
+
+Rules that keep it forkable:
+
+- Nothing account-specific in code: project IDs, region, billing account, GitHub repo and alert email are variables; globally unique names derive from the project ID (`${project_id}-raw`)
+- The config files are the truth. The wizard only writes them, so a fork's setup is reviewable and re-runnable
+- Deploy tooling lives in `deploy/` and the Makefile, never in `jtf`: the app knows nothing about where it runs
+- Each fork builds its own image; nothing depends on this repo's registry or credentials
+- The guide, `docs/deploy-your-own.md`, covers the steps, costs per profile, and the data terms a fork inherits: Open-Meteo's free tier is non-commercial only, and JEPX and TEPCO expect polite download rates
+- Proof: the dev project is the first fork. It is stood up from nothing using only the guide, `make init` and `make bootstrap`
 
 ## Development and release workflow
 
@@ -459,7 +484,7 @@ The MVP comes first and stands on its own; everything else comes after, and each
 | 2. Daily forecast in prod | Scheduled prediction with the fallback ladder and the fallback job; evaluation; hosted MLflow; exports and restore drill | 7 consecutive green days; restore drill passed; watchdog and fallback job tested | To be written |
 | 3. Monitoring | Drift and accuracy dbt models, React dashboard, model health card, release gate with shadow runs | A replayed fault scenario is flagged on the right day | To be written |
 | 4. Price model | M2 live next to M1 | M2 skill above 0 vs persistence | To be written |
-| 5. Full | Remaining fault scenarios, AI triage evaluated on them, optimism gap, blog post | Full success criteria below | To be written |
+| 5. Full | Remaining fault scenarios, AI triage evaluated on them, optimism gap, fork guide and `make init`, blog post | Full success criteria below | To be written |
 
 The MVP alone tells a complete story: a solar forecast built only from what was known at decision time, and a measured account of what a lookahead leak did to the backtest.
 
@@ -471,7 +496,7 @@ The MVP succeeds if the solar model beats persistence in an as-of backtest and t
 
 - [ ] MVP: the capture job running daily; Dagster in prod showing every capture and the pipeline running on new data; three sources parsed into as-of layers in dev BigQuery with the `jtf` commands; the time machine passing its determinism and future-poison tests; M1 skill above 0 vs persistence and compared with TEPCO's forecast; F1 and F2 written up; README explains the design. The detailed checks are in the [phase 1 plan](phase1/README.md#done-when)
 - [ ] Daily forecast in prod: 7 consecutive green days; a restore drill passed; the outside watchdog and the fallback job tested
-- [ ] Full: M2 live; all thirteen scenarios written up; AI triage evaluated on the scenarios; optimism gap measured; blog post published
+- [ ] Full: M2 live; all thirteen scenarios written up; AI triage evaluated on the scenarios; optimism gap measured; the dev project rebuilt from nothing using only the fork guide; blog post published
 
 **Risks**
 
@@ -501,7 +526,7 @@ The MVP succeeds if the solar model beats persistence in an as-of backtest and t
 - Source for installed solar capacity in the Tokyo area, for normalization
 - Which Kanto points to use for weather, and how to weight them
 - Retraining cadence for the backtest (weekly or monthly)
-- Repo public (assumed)?
+- Repo public (assumed)? Code license: Apache-2.0 or MIT; data stays under each source's terms
 
 ## Sources
 
