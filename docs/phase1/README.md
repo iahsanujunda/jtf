@@ -106,7 +106,9 @@ Each change below came out of [the history probe](../../notebooks/01_history_pro
 | Open-Meteo drops the model suffix when one model is requested | Column names in single-model responses | Parsers accept both column forms |
 | Lead history is shorter than documented | MSM's leads from mid-2022 to mid-2023, ECMWF's from spring 2024 | Nulls are kept as data; features fall back explicitly |
 | Some decision-time runs land exactly at `T` | MSM 21 UTC, GSM and ECMWF 18 UTC with the assumed delays | Two runs per model per day in the single-runs history |
-| JMA's single-runs archive starts around mid-May 2026, not 2 April, with scattered missing runs later (ECMWF too, on one day) | The initial load: about 40 runs per JMA run type answered "The requested model run is not available" | A missing run is stored as a recorded gap (the answer and its status in the sidecar) and requested only once; exact-run fidelity for JMA starts in mid-May |
+| JMA's single-runs archive starts on 12 May 2026, not 2 April, with scattered missing runs later (ECMWF too, on one day) | The initial load: about 40 runs per JMA run type answered "The requested model run is not available"; [the history probe](../../notebooks/01_history_probe.ipynb), section 7, pins the start | A missing run is stored as a recorded gap (the answer and its status in the sidecar) and requested only once; exact-run fidelity for JMA starts on 12 May |
+| The capture account couldn't list the raw bucket | The initial load: `403` on listing with only `objectCreator` | Add `objectViewer`: reading and listing, still no delete or overwrite |
+| A permanent error, counted as a failure, is multiplied by Cloud Run's task retries | The first load: about 1,500 quota calls per retry on runs that can't exist | Only errors a retry can fix fail a source |
 
 ## Point-in-time rules
 
