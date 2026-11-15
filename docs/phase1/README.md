@@ -41,7 +41,7 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 | --- | --- | --- | --- |
 | TEPCO area actuals | `https://www.tepco.co.jp/forecast/html/images/eria_jukyu_YYYYMM_03.csv` (one per month, from 2024-02); older `area-YYYY.csv` (one per fiscal year, FY2016–2023, hourly) UTF-8 or CP932, **varying from file to file**; row 1 `単位[MW平均]`; 30-min slots labelled by start time; **MW averaged over the slot**. The yearly files differ: 万kWh per hour, a two-row header, thousands separators, one thermal column. Columns include `太陽光発電実績`, `太陽光出力制御量` (curtailment), `風力発電実績` | Target, lags |
 | TEPCO next-day forecast | `https://www4.tepco.co.jp/forecast/html/images/AREA_ONCE_YOSOKU.csv`, `AREA_ONCE_BGKEI.csv` | Shift_JIS; row 2 holds the file's update time and target date; `時間コマ` 1–48; **kWh per slot**; **wind + solar combined** | Benchmark only |
-| TEPCO same-day files | `AREA_YOSOKU.csv`, `AREA_BGKEI.csv`, `AREA_JISEKI.csv` (same folder); `juyo-d1-j.csv` | kWh per slot; 万kW, hourly and 5-min | `AREA_*` parsed into ODS with the next-day parser; `juyo-d1-j.csv` kept raw. No phase-1 feature uses them |
+| TEPCO same-day files | `AREA_YOSOKU.csv`, `AREA_BGKEI.csv`, `AREA_JISEKI.csv` (same folder); `juyo-d1-j.csv` | kWh per slot; 万kW, hourly and 5-min | Parsed into ODS for feature exploration: the `AREA_*` files with the next-day parser, `juyo-d1-j.csv` into three tables by block shape |
 | Open-Meteo Previous Runs | `https://previous-runs-api.open-meteo.com/v1/forecast`, `models=jma_msm,jma_gsm,ecmwf_ifs025`, variables with `_previous_day2` | JSON, hourly | Weather features over the long history |
 | Open-Meteo Single Runs | `https://single-runs-api.open-meteo.com/v1/forecast?...&run=YYYY-MM-DDTHH:MM` (UTC) | JSON, hourly; archive from 2026-04-02 | Exact-run features; measuring how pessimistic `previous_day2` is |
 | Open-Meteo live | `https://api.open-meteo.com/v1/forecast`, same models and variables | JSON, hourly | Today's forecast inputs |
@@ -84,7 +84,7 @@ One-off executions of the capture jobs with `--initial` (and a longer task timeo
 
 | Source | Range | Requests | Notes |
 | --- | --- | --- | --- |
-| `tepco_actuals` | Monthly files from 2024-02; yearly files FY2016–FY2023, kept raw | about 42, 8 MB | Final values: later corrections are baked in. The yearly files are parsed only when a later phase needs them |
+| `tepco_actuals` | Monthly files from 2024-02; yearly files FY2016–FY2023 | about 42, 8 MB | Final values: later corrections are baked in. The yearly files have their own table, `ods.tepco_actuals_yearly` |
 | `jepx_spot` | FY2016 to last fiscal year | about 10, 20 MB | The current year comes from the daily capture |
 | `openmeteo_previous_runs` (history only) | 2024-01 to now, one request per calendar month, all three models, leads `latest`, `previous_day1`, `previous_day2` | about 35, 3,600 Open-Meteo calls | `latest` and `previous_day1` exist only for the leak scenario F2; features use `previous_day2`. MSM's leads exist from mid-2022 to mid-2023 onward; ECMWF's radiation from 5–7 March 2024, its other variables from early February. MSM's radiation is missing at every lead from 23 January to 15 February 2024 (notebook 02) |
 | `openmeteo_single_runs` (history only) | 2026-04-02 to now: MSM 18 and 21 UTC, GSM and ECMWF 12 and 18 UTC, each day | about 1,400, 12,000 calls | More than a day of free quota: the loader paces itself from `X-RateLimit-Cost`, stops cleanly near the daily limit and resumes the next day |
@@ -144,15 +144,17 @@ Each change below came out of [the history probe](../../notebooks/01_history_pro
 | ODS table | From | One row per |
 | --- | --- | --- |
 | `ods.tepco_actuals` | Monthly `eria_jukyu` files | Slot, per capture |
+| `ods.tepco_actuals_yearly` | Yearly `area-YYYY.csv` files, FY2016–FY2023 (万kWh, hourly) | Hour |
 | `ods.tepco_area_forecast_next_day`, `ods.tepco_area_bg_plan_next_day` | `AREA_ONCE_YOSOKU`, `AREA_ONCE_BGKEI` | Slot code, per capture |
 | `ods.tepco_area_forecast`, `ods.tepco_area_bg_plan`, `ods.tepco_area_actuals_today` | `AREA_YOSOKU`, `AREA_BGKEI`, `AREA_JISEKI`, with the same parser | Slot code, per capture |
+| `ods.tepco_demand_outlook_peaks`, `_hourly`, `_5min` | `juyo-d1-j.csv`, by block shape: the headline figures, the hourly block, the 5-minute block (demand and solar) | Figure, hour or 5 minutes, per file |
 | `ods.jepx_spot` | Spot summary files | Delivery day and slot code, per capture |
 | `ods.openmeteo_previous_runs` | Previous Runs JSON | Point, model, `lead_days`, hour |
 | `ods.openmeteo_single_runs` | Single Runs JSON | Point, model, hour, per run (`run_time`) |
 | `ods.openmeteo_live` | Live JSON | Point, model, hour, per capture |
-| `ods.raw_files` | Every sidecar | Raw file: status (`parsed`, `empty`, `gap`, `kept raw`, `ignored`, `failed`), rows, check result |
+| `ods.raw_files` | Every sidecar | Raw file: status (`parsed`, `empty`, `gap`, `failed`), rows, check result |
 
-The Open-Meteo tables are semi-long: the model and lead, which the API packs into column names, become columns, and each variable stays a column with its unit asserted. Not parsed: the yearly `area-YYYY.csv` files and `juyo-d1-j.csv` (kept raw), and prefixes that are not registered sources.
+The Open-Meteo tables are semi-long: the model and lead, which the API packs into column names, become columns, and each variable stays a column with its unit asserted. Nothing captured stays raw: one ODS table per source and file layout (or block shape), 15 tables in all ([notebook 02](../../notebooks/02_raw_to_ods.ipynb), section 12). Only prefixes that are not registered sources are ignored.
 
 Every ODS row carries its lineage: `source_file`, `extraction_date`, `fetched_at`, `load_type` (`daily`, `initial` or `recapture`), `source_time` (the update time written in the file, else `Last-Modified`), `row_number` (CSV tables), `parser_version`, `ingested_at` and `batch_id`. ODS has no `known_at` and no shared `valid_time`: a version and its `known_at` depend on other captures of the same file, and slot times are meaning, so DWD derives both. A parser refuses a file whose shape changed (unknown columns, unit row, units, time zone, column count); a missing column becomes nulls. ODS is append-only and partitioned by `extraction_date`: a parser change re-parses under a new `parser_version`, and DWD reads the newest version per file.
 
@@ -260,7 +262,8 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 | ODS contract | Done: parsing changes the format, never the meaning; lineage on every row; versions, `known_at`, units and slot times in DWD ([notebook 02](../../notebooks/02_raw_to_ods.ipynb)) | 3 |
 | Re-parsing | Done: append under a new `parser_version`, which is the ODS asset's code version | 3 |
 | Open-Meteo ODS shape | Done: semi-long, with model and lead as columns and a column per variable | 5 |
-| Same-day TEPCO area files | Done: parsed into ODS with the next-day parser | 5 |
+| Every captured file as a table | Done: 15 ODS tables, the yearly actuals and the demand outlook included, for feature exploration | 5 |
+| Demand outlook history | Proposed: TEPCO's monthly archive (`YYYYMM_power_usage.zip`, April 2022 on) as the source's `initial` items, and the current and previous month in its daily capture ([notebook 02](../../notebooks/02_raw_to_ods.ipynb), section 12.2) | 5 |
 | Training window | Done: target days from 2024-02-17; later weather holes fall back to ECMWF at the same lead | 7 |
 | VM size | `e2-medium`; resize if runs need more memory | 4 |
 | Dagster UI access | IAP tunnel; Tailscale is the alternative if the tunnel gets tedious | 4 |
