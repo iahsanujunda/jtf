@@ -159,6 +159,8 @@ def _content_type(filename: str) -> str:
         return "text/csv"
     if filename.endswith(".json"):
         return "application/json"
+    if filename.endswith(".zip"):
+        return "application/zip"
     return "application/octet-stream"
 
 

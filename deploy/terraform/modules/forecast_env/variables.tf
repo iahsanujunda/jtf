@@ -48,5 +48,12 @@ variable "capture_sources" {
       schedule     = "30 9 1 * *"
       task_retries = 1
     }
+    # The demand outlook's archive zips are rewritten for months too.
+    tepco_demand_outlook_recapture = {
+      source       = "tepco_demand_outlook"
+      extra_args   = ["--recapture"]
+      schedule     = "40 9 1 * *"
+      task_retries = 1
+    }
   }
 }

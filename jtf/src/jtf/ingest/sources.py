@@ -64,6 +64,8 @@ SINGLE_RUNS: tuple[tuple[str, int], ...] = (
 )
 
 TEPCO_MONTHLY_FROM = date(2024, 2, 1)
+# TEPCO's archive of the demand outlook: one zip a month of end-of-day daily files.
+POWER_USAGE_FROM = date(2022, 4, 1)
 TEPCO_YEARLY_FISCAL_YEARS = range(2016, 2024)
 JEPX_FROM_FISCAL_YEAR = 2016
 PREVIOUS_RUNS_FROM = date(2024, 1, 1)
@@ -196,6 +198,31 @@ def _tepco_actuals_history(now: datetime) -> list[FetchItem]:
     return yearly + _tepco_actuals_monthly(now)
 
 
+# ---------------------------------------------------------------- TEPCO demand outlook
+
+
+def _power_usage(month: date) -> FetchItem:
+    name = f"{month:%Y%m}_power_usage.zip"
+    return FetchItem("tepco_demand_outlook", name, f"{TEPCO_WWW}/{name}")
+
+
+def _demand_outlook_daily(now: datetime) -> list[FetchItem]:
+    """Today's file, plus the archive months of yesterday and the month before.
+
+    Yesterday's final version is added to its month's zip each morning, and recent months are
+    rewritten without notice. Yesterday's month, not today's: on the 1st, this month's zip
+    doesn't exist yet.
+    """
+    yesterday = _yesterday_jst(now).replace(day=1)
+    before = (yesterday - timedelta(days=1)).replace(day=1)
+    live = FetchItem("tepco_demand_outlook", "juyo-d1-j.csv", f"{TEPCO_WWW}/juyo-d1-j.csv")
+    return [live, _power_usage(before), _power_usage(yesterday)]
+
+
+def _power_usage_months(now: datetime) -> list[FetchItem]:
+    return [_power_usage(m) for m in _month_starts(POWER_USAGE_FROM, _yesterday_jst(now))]
+
+
 # ---------------------------------------------------------------- JEPX
 
 
@@ -315,7 +342,12 @@ SOURCES: dict[str, Source] = {
         _single_file("tepco_area_forecast", TEPCO_WWW4, "AREA_YOSOKU.csv"),
         _single_file("tepco_area_bg_plan", TEPCO_WWW4, "AREA_BGKEI.csv"),
         _single_file("tepco_area_actuals_today", TEPCO_WWW4, "AREA_JISEKI.csv"),
-        _single_file("tepco_demand_outlook", TEPCO_WWW, "juyo-d1-j.csv"),
+        Source(
+            "tepco_demand_outlook",
+            items=_demand_outlook_daily,
+            history=_power_usage_months,
+            recapture=_power_usage_months,
+        ),
         _single_file("tepco_area_forecast_next_day", TEPCO_WWW4, "AREA_ONCE_YOSOKU.csv"),
         _single_file("tepco_area_bg_plan_next_day", TEPCO_WWW4, "AREA_ONCE_BGKEI.csv"),
         Source("openmeteo_live", items=_openmeteo_live, retry=PATIENT, pacing=OPEN_METEO_PACING),

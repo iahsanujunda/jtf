@@ -30,7 +30,6 @@ def test_one_file_per_tepco_same_day_and_next_day_source():
     assert filenames("tepco_area_forecast") == ["AREA_YOSOKU.csv"]
     assert filenames("tepco_area_bg_plan") == ["AREA_BGKEI.csv"]
     assert filenames("tepco_area_actuals_today") == ["AREA_JISEKI.csv"]
-    assert filenames("tepco_demand_outlook") == ["juyo-d1-j.csv"]
     assert filenames("tepco_area_forecast_next_day") == ["AREA_ONCE_YOSOKU.csv"]
     assert filenames("tepco_area_bg_plan_next_day") == ["AREA_ONCE_BGKEI.csv"]
 
@@ -107,3 +106,25 @@ def test_history_only_sources_have_no_daily_items():
 def test_unknown_source_is_rejected():
     with pytest.raises(ValueError):
         get_source("tepco_sameday")
+
+
+def test_demand_outlook_takes_todays_file_and_the_last_two_archive_months():
+    assert filenames("tepco_demand_outlook") == [
+        "juyo-d1-j.csv",
+        "202610_power_usage.zip",
+        "202611_power_usage.zip",
+    ]
+    # On the 1st, this month's zip doesn't exist yet: yesterday's month is the newest.
+    first = datetime(2026, 12, 1, 8, 45, tzinfo=JST)
+    assert filenames("tepco_demand_outlook", when=first)[1:] == [
+        "202610_power_usage.zip",
+        "202611_power_usage.zip",
+    ]
+
+
+def test_demand_outlook_history_is_every_archive_month_since_april_2022():
+    months = filenames("tepco_demand_outlook", "initial")
+    assert months[0] == "202204_power_usage.zip"
+    assert months[-1] == "202611_power_usage.zip"
+    assert len(months) == 56
+    assert filenames("tepco_demand_outlook", "recapture") == months

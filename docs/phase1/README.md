@@ -66,7 +66,8 @@ Capture is organised **by source**: one source file is one capture job, one raw 
 | `tepco_area_forecast` | `AREA_YOSOKU.csv` | `45 8 * * *` | standard |
 | `tepco_area_bg_plan` | `AREA_BGKEI.csv` | `45 8 * * *` | standard |
 | `tepco_area_actuals_today` | `AREA_JISEKI.csv` | `45 8 * * *` | standard |
-| `tepco_demand_outlook` | `juyo-d1-j.csv` | `45 8 * * *` | standard |
+| `tepco_demand_outlook` | `juyo-d1-j.csv`, plus the archive zips (`YYYYMM_power_usage.zip`) of yesterday's month and the month before: yesterday's final version lands in its month's zip each morning. Not this month's on the 1st, when it doesn't exist yet | `45 8 * * *` | standard |
+| `tepco_demand_outlook` (re-capture) | Every archive zip, sent with `If-Modified-Since`; TEPCO rewrites them for months | `40 9 1 * *` | standard |
 | `tepco_area_forecast_next_day` | `AREA_ONCE_YOSOKU.csv`, cleared at about 23:13 and never archived | `0 19,22 * * *` | standard |
 | `tepco_area_bg_plan_next_day` | `AREA_ONCE_BGKEI.csv` | `0 19,22 * * *` | standard |
 | `openmeteo_live` | One request: all nine points, MSM, GSM and ECMWF IFS 0.25° | `45 8 * * *` | patient: 10 s connect timeout, 5 attempts, 3 task retries, since connections from Cloud Run sometimes fail to open and a fresh attempt succeeds |
@@ -86,6 +87,7 @@ One-off executions of the capture jobs with `--initial` (and a longer task timeo
 | --- | --- | --- | --- |
 | `tepco_actuals` | Monthly files from 2024-02; yearly files FY2016–FY2023 | about 42, 8 MB | Final values: later corrections are baked in. The yearly files have their own table, `ods.tepco_actuals_yearly` |
 | `jepx_spot` | FY2016 to last fiscal year | about 10, 20 MB | The current year comes from the daily capture |
+| `tepco_demand_outlook` | TEPCO's archive of the file, `YYYYMM_power_usage.zip`, 2022-04 to yesterday's month: one end-of-day file a day | 56, about 4.5 MB | Archived "tomorrow" figures were updated on the day they describe; their own update times keep them out of day-before features ([notebook 02](../../notebooks/02_raw_to_ods.ipynb), section 12.2) |
 | `openmeteo_previous_runs` (history only) | 2024-01 to now, one request per calendar month, all three models, leads `latest`, `previous_day1`, `previous_day2` | about 35, 3,600 Open-Meteo calls | `latest` and `previous_day1` exist only for the leak scenario F2; features use `previous_day2`. MSM's leads exist from mid-2022 to mid-2023 onward; ECMWF's radiation from 5–7 March 2024, its other variables from early February. MSM's radiation is missing at every lead from 23 January to 15 February 2024 (notebook 02) |
 | `openmeteo_single_runs` (history only) | 2026-04-02 to now: MSM 18 and 21 UTC, GSM and ECMWF 12 and 18 UTC, each day | about 1,400, 12,000 calls | More than a day of free quota: the loader paces itself from `X-RateLimit-Cost`, stops cleanly near the daily limit and resumes the next day |
 | TEPCO next-day forecast | None exists | – | The benchmark starts at the first capture |
@@ -263,7 +265,7 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 | Re-parsing | Done: append under a new `parser_version`, which is the ODS asset's code version | 3 |
 | Open-Meteo ODS shape | Done: semi-long, with model and lead as columns and a column per variable | 5 |
 | Every captured file as a table | Done: 15 ODS tables, the yearly actuals and the demand outlook included, for feature exploration | 5 |
-| Demand outlook history | Proposed: TEPCO's monthly archive (`YYYYMM_power_usage.zip`, April 2022 on) as the source's `initial` items, and the current and previous month in its daily capture ([notebook 02](../../notebooks/02_raw_to_ods.ipynb), section 12.2) | 5 |
+| Demand outlook history | Done: TEPCO's monthly archive (`YYYYMM_power_usage.zip`, April 2022 on) as the source's `initial` items, the last two months in its daily capture, and a monthly re-capture ([notebook 02](../../notebooks/02_raw_to_ods.ipynb), section 12.2) | 5 |
 | Training window | Done: target days from 2024-02-17; later weather holes fall back to ECMWF at the same lead | 7 |
 | VM size | `e2-medium`; resize if runs need more memory | 4 |
 | Dagster UI access | IAP tunnel; Tailscale is the alternative if the tunnel gets tedious | 4 |
