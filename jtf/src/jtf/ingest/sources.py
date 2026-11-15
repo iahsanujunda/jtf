@@ -119,6 +119,12 @@ OPEN_METEO_PACING = Pacing(min_interval_s=1, calls_per_minute=600)
 OPEN_METEO_DAILY_BUDGET = 8000.0
 
 Items = Callable[[datetime], list[FetchItem]]
+GapCheck = Callable[[int, bytes], bool]
+
+
+def missing_run(status: int, body: bytes) -> bool:
+    """Open-Meteo's answer for a run its archive doesn't have: a permanent gap, not an error."""
+    return status == 400 and b"model run is not available" in body
 
 
 @dataclass(frozen=True)
@@ -131,6 +137,8 @@ class Source:
     pacing: Pacing = POLITE
     call_budget: float | None = None
     """Stop a run once this many weighted calls are spent; a later run resumes."""
+    is_gap: GapCheck | None = None
+    """Answers that mean "this item doesn't exist": stored as a recorded gap, not a failure."""
 
     @property
     def slug(self) -> str:
@@ -324,6 +332,8 @@ SOURCES: dict[str, Source] = {
             retry=PATIENT,
             pacing=OPEN_METEO_PACING,
             call_budget=OPEN_METEO_DAILY_BUDGET,
+            # JMA's archive starts around mid-May 2026, not 2 April, and has later holes.
+            is_gap=missing_run,
         ),
         Source("jepx_spot", items=_jepx_daily, history=_jepx_history),
     )

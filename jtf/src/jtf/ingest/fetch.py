@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 import httpx
 
 from jtf import __version__
-from jtf.ingest.sources import JST, FetchItem, RetryPolicy, Source
+from jtf.ingest.sources import JST, FetchItem, GapCheck, RetryPolicy, Source
 from jtf.storage import Store
 
 log = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ class CaptureResult:
     stored: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    gaps: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
     calls_spent: float = 0.0
     stopped: str | None = None
@@ -56,7 +57,7 @@ class CaptureResult:
     def summary(self) -> str:
         lines = [
             f"source={self.source} mode={self.mode} stored={len(self.stored)} "
-            f"unchanged={len(self.unchanged)} skipped={len(self.skipped)} "
+            f"unchanged={len(self.unchanged)} skipped={len(self.skipped)} gaps={len(self.gaps)} "
             f"failed={len(self.failures)} calls={self.calls_spent:g}"
         ]
         if self.stopped:
@@ -71,6 +72,7 @@ class Fetched:
     stored: str | None
     status: int
     cost: float
+    gap: bool = False
 
 
 class Healthcheck:
@@ -169,6 +171,7 @@ def fetch_item(
     now: Callable[[], datetime],
     load_type: str = "daily",
     if_modified_since: str | None = None,
+    is_gap: GapCheck | None = None,
     image_digest: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Fetched:
@@ -181,7 +184,9 @@ def fetch_item(
         return Fetched(None, 304, cost)
     if response.status_code == 429:
         raise QuotaExhausted(f"{item.url} answered 429: {response.text[:200]}")
-    response.raise_for_status()
+    gap = bool(is_gap and is_gap(response.status_code, response.content))
+    if not gap:
+        response.raise_for_status()
 
     fetched_at = now().astimezone(UTC)
     fetched_jst = fetched_at.astimezone(JST)
@@ -203,6 +208,7 @@ def fetch_item(
         "fetched_at_jst": fetched_jst.isoformat(),
         "extraction_date": extraction_date,
         "http_status": response.status_code,
+        "gap": gap,
         "response_headers": {
             k: v for k, v in response.headers.items() if k.lower() not in DROPPED_HEADERS
         },
@@ -216,7 +222,7 @@ def fetch_item(
         json.dumps(meta, ensure_ascii=False, indent=2).encode(),
         "application/json",
     )
-    return Fetched(stored, response.status_code, cost)
+    return Fetched(stored, response.status_code, cost, gap)
 
 
 def stored_files(store: Store, source: str) -> dict[str, list[str]]:
@@ -282,12 +288,15 @@ def run_source(
                 now=now,
                 load_type=mode,
                 if_modified_since=_last_modified(store, previous[-1]) if previous else None,
+                is_gap=source.is_gap,
                 image_digest=image_digest,
                 sleep=sleep,
             )
             result.calls_spent += fetched.cost
             last_cost = fetched.cost
-            if fetched.stored:
+            if fetched.gap:
+                result.gaps.append(item.filename)
+            elif fetched.stored:
                 result.stored.append(fetched.stored)
             else:
                 result.unchanged.append(item.filename)

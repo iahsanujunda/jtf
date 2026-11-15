@@ -248,3 +248,58 @@ def test_initial_loads_do_not_ping_and_recapture_has_its_own_check():
 def test_a_mode_a_source_lacks_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         run_source(get_source("openmeteo_single_runs"), store=LocalStore(tmp_path))
+
+
+def test_a_run_missing_from_the_archive_is_stored_as_a_gap_once(tmp_path):
+    store = LocalStore(tmp_path)
+    source = get_source("openmeteo_single_runs")
+    missing = b'{"error":true,"reason":"The requested model run is not available."}'
+
+    def handler(request):
+        if request.url.params["models"] == "jma_msm":
+            return httpx.Response(400, content=missing, headers={"X-RateLimit-Cost": "9"})
+        return httpx.Response(200, content=b"{}", headers={"X-RateLimit-Cost": "9"})
+
+    first = run_source(
+        source,
+        mode="initial",
+        store=store,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        now=lambda: datetime(2026, 4, 4, 3, tzinfo=UTC),
+        sleep=lambda _: None,
+    )
+    assert first.ok
+    assert first.gaps == ["jma_msm_2026-04-02T18Z.json", "jma_msm_2026-04-02T21Z.json"]
+    assert len(first.stored) == 4
+    gap_meta = next(
+        p
+        for p in store.list("openmeteo_single_runs/")
+        if "jma_msm" in p and p.endswith(".meta.json")
+    )
+    meta = json.loads(store.get(gap_meta))
+    assert meta["gap"] is True and meta["http_status"] == 400
+
+    again = run_source(
+        source,
+        mode="initial",
+        store=store,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        now=lambda: datetime(2026, 4, 4, 3, tzinfo=UTC),
+        sleep=lambda _: None,
+    )
+    assert len(again.skipped) == 6 and not again.gaps
+
+
+def test_other_client_errors_still_fail(tmp_path):
+    def handler(request):
+        return httpx.Response(400, content=b'{"error":true,"reason":"Cannot initialize"}')
+
+    result = run_source(
+        get_source("openmeteo_single_runs"),
+        mode="initial",
+        store=LocalStore(tmp_path),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        now=lambda: datetime(2026, 4, 4, 3, tzinfo=UTC),
+        sleep=lambda _: None,
+    )
+    assert not result.ok and len(result.failures) == 6
