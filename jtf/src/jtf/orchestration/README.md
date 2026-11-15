@@ -16,3 +16,5 @@ Dagster definitions. Assets are thin wrappers over `jtf` functions: no logic liv
 | Run-failure sensor that starts AI triage | 5 |
 
 Every asset carries a code version, so a release that changes one marks its partitions out of date. Every run is tagged with its image digest.
+
+**Locally:** `make dagster` serves the UI on http://localhost:3000, keeps Dagster's state in `.dagster/` and reads settings from a gitignored `.env` at the repo root (names in [deploy/contract](../../../../deploy/contract/settings.example.env)): `JTF_RAW_URL` pointing at the prod raw bucket, read-only, and `JTF_BIGQUERY_PROJECT` at the dev project. Both sensors, `raw_bucket_sensor` and `automation`, start running. A day recorded before its ODS asset existed is loaded by hand (Materialize, pick the partition); from then on, a newly recorded capture starts the parse of its day on its own.

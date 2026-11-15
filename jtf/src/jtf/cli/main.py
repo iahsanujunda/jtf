@@ -76,3 +76,48 @@ def fetch(
     typer.echo(result.summary())
     if not result.ok:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def parse(
+    source: Annotated[str, typer.Option(help="Source with a parser, e.g. tepco_actuals.")],
+    from_day: Annotated[str, typer.Option("--from", help="First extraction day, YYYY-MM-DD.")],
+    to_day: Annotated[
+        str | None, typer.Option("--to", help="Last extraction day; defaults to --from.")
+    ] = None,
+    raw_url: Annotated[
+        str | None,
+        typer.Option(envvar="JTF_RAW_URL", help="Raw store: gs://bucket or file:///path."),
+    ] = None,
+    bigquery_project: Annotated[
+        str | None,
+        typer.Option(envvar="JTF_BIGQUERY_PROJECT", help="Project holding the ods dataset."),
+    ] = None,
+) -> None:
+    """Parse raw files into the source's ODS tables; files already loaded are skipped."""
+    import uuid
+    from datetime import UTC, date, datetime, timedelta
+
+    from jtf.parse import parsers_for
+    from jtf.parse.bigquery import BigQueryWarehouse
+    from jtf.parse.load import parse_day
+    from jtf.storage import open_store
+
+    if not raw_url or not bigquery_project:
+        raise typer.BadParameter("Set --raw-url and --bigquery-project, or their JTF_ variables.")
+    parsers = parsers_for(source)
+    store, warehouse = open_store(raw_url), BigQueryWarehouse(bigquery_project)
+    first = date.fromisoformat(from_day)
+    last = date.fromisoformat(to_day) if to_day else first
+    batch_id = f"cli-{uuid.uuid4().hex[:12]}"
+    ok = True
+    for parser in parsers:
+        for offset in range((last - first).days + 1):
+            day = (first + timedelta(days=offset)).isoformat()
+            result = parse_day(
+                parser, store, warehouse, day, batch_id=batch_id, now=datetime.now(UTC)
+            )
+            typer.echo(f"{parser.table}: {result.summary()}")
+            ok = ok and result.ok
+    if not ok:
+        raise typer.Exit(code=1)

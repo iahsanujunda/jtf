@@ -6,7 +6,8 @@ The Python package behind the `jtf` command, and the owner of all pipeline logic
 | --- | --- |
 | [cli/](src/jtf/cli/) | The `jtf` entry point and its subcommands |
 | [orchestration/](src/jtf/orchestration/) | Dagster definitions: assets, partitions, sensors, schedules, checks |
-| [ingest/](src/jtf/ingest/) | Fetch and parse, one module per source |
+| [ingest/](src/jtf/ingest/) | Capture: the source registry, fetch and its modes, which raw files have landed |
+| [parse/](src/jtf/parse/) | Raw files to ODS rows: one parser per file layout, the per-day loader, the BigQuery writer |
 | [storage/](src/jtf/storage/) | Raw and model files by URL (`gs://` in GCP, `file://` in tests) |
 | [ml/](src/jtf/ml/) | Baselines, models, training, prediction, backtests and the replay runner |
 | [faults/](src/jtf/faults/) | Fault switches and scenario presets |

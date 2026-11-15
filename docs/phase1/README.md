@@ -135,7 +135,7 @@ Each change below came out of [the history probe](../../notebooks/01_history_pro
 
 **Fetch** (`jtf fetch --source S [--initial]`, in the capture jobs only) downloads a file and writes it unchanged through `storage`:
 
-- Path: `raw/{source}/{extraction_date_jst}/{fetched_at}_{filename}`, plus `{…}.meta.json` with fetch time, URL, request parameters, response headers and any update time found inside the file (`source_time`)
+- Path: `raw/{source}/{extraction_date_jst}/{fetched_at}_{filename}`, plus `{…}.meta.json` with fetch time, URL, request parameters and response headers. The update time written inside some files is read by the parser, as `source_time`
 - Create-only: `if_generation_match=0` in code, and the job's service account has only `roles/storage.objectCreator` and `roles/storage.objectViewer` (to list and read, for resumable loads and re-captures); neither can delete or overwrite. An existing file cannot be replaced even by a bug
 - No parsing in the fetch step
 

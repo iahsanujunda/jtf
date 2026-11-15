@@ -1,0 +1,29 @@
+{
+  "source": "tepco_actuals",
+  "filename": "area-2016.csv",
+  "load_type": "initial",
+  "url": "https://www.tepco.co.jp/forecast/html/images/area-2016.csv",
+  "method": "GET",
+  "params": {},
+  "form": {},
+  "if_modified_since": null,
+  "fetched_at": "2026-11-15T04:52:40.111927+00:00",
+  "fetched_at_jst": "2026-11-15T13:52:40.111927+09:00",
+  "extraction_date": "2026-11-15",
+  "http_status": 200,
+  "response_headers": {
+    "server": "Apache",
+    "last-modified": "Tue, 14 Dec 2021 00:59:50 GMT",
+    "etag": "\"7d447-5d310b4cfad80\"",
+    "accept-ranges": "bytes",
+    "content-length": "513095",
+    "content-type": "text/csv",
+    "date": "Sun, 15 Nov 2026 04:52:40 GMT",
+    "connection": "keep-alive",
+    "strict-transport-security": "max-age=15768000 ; preload"
+  },
+  "size_bytes": 362,
+  "sha256": "e0349d8fe2be370412924f6030169129774bdde5ec67e5c2549b17c0c69a26ed",
+  "jtf_version": "0.1.0",
+  "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:df1e00fe25d91d74f54caa2e88b926b7fae3fb8e738bf0b826c1ec4b7d5d6b95"
+}
