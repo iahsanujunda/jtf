@@ -56,7 +56,7 @@ Three free public sources (JEPX, TEPCO Power Grid and Open-Meteo) cover everythi
 
 **Units and slot labels differ across sources**, even within TEPCO: MW averaged over the slot, kWh per slot (÷ 500 for MW) and 万kW (× 10 for MW); slots labelled by start time, by code 1–48, or as `0000`–`2400`. Parse keeps the source's values; DWD converts everything to MW and the slot's start time in JST, with range checks (F4, F5).
 
-**Weather locations:** a handful of points across the Kanto prefectures, averaged by approximate solar capacity. TEPCO itself uses 63 forecast points ([OCCTO reference](https://www.occto.or.jp/assets/news/shutsuryokuyokusei_1/260701_sankoushiryo_tokyo.pdf)).
+**Weather locations:** a handful of points across the Kanto prefectures, averaged by each prefecture's share of installed solar capacity as of `T`: the weights are data with their own `known_at`, not settings. TEPCO itself uses 63 forecast points ([OCCTO reference](https://www.occto.or.jp/assets/news/shutsuryokuyokusei_1/260701_sankoushiryo_tokyo.pdf)).
 
 **Variables:** shortwave radiation (GHI), direct and diffuse radiation, cloud cover, 2 m temperature, 100 m wind speed.
 
@@ -111,8 +111,8 @@ This is the core of the project: every input carries when it became known, every
 | Weather, Previous Runs | – | Valid hour − 48 h + the model's availability delay (MSM 3 h, GSM and ECMWF 6 h), for `previous_day2`. `previous_day1` is **not** allowed: for midday slots of D it comes from a run issued after `T` | All slots of D: even D's last hour − 48 h + 6 h lands before `T` |
 | Weather, Single Runs (from 2026-04-02) | – | Run start + assumed availability delay (MSM 3 h, GSM and ECMWF 6 h), replaced by measured delays from our captures | The latest run with `known_at ≤ T` |
 | Weather, live | Fetch time (the response names no run) | – | The run fetched at `T` |
-| Solar capacity estimate | Publication date of each update | Publication date of each update | The latest update with `known_at ≤ T` |
-| Holiday calendar, weather points and weights, settings | Pinned in the image | Pinned in the image | Whatever the run's image digest contains |
+| Solar capacity estimate | Fetch time of the first capture of a release | The end of the latest announcement date any stored copy of the publisher's page showed, never before the file's own date: the publisher later moved its dates earlier | The newest release with `known_at ≤ T`, extended to D by its recent trend |
+| Holiday calendar, weather points, settings | Pinned in the image | Pinned in the image | Whatever the run's image digest contains |
 
 **Time machine**
 
@@ -126,7 +126,7 @@ This is the core of the project: every input carries when it became known, every
 What it needs:
 
 - Raw files that are never modified, and an append-only ODS with its capture evidence (`source_file`, `fetched_at`) on every row
-- Everything that is not data lives in the image: code, dbt models, the holiday calendar version, weather points and weights, settings. Every run records its image digest
+- Everything that is not data lives in the image: code, dbt models, the holiday calendar version, weather points, settings. Every run records its image digest
 - Everything that is data and changes over time carries `known_at`, including reference data such as the capacity estimate
 - Every model version that ever served stays in Cloud Storage and MLflow; no lifecycle rule deletes them
 - Each published run stores `T`, its image digest, model versions and input snapshot in ADS, so a replay can be compared with the original feature by feature, not only at the output
@@ -408,7 +408,7 @@ One stack, with fault switches that are off in normal runs. Each scenario is a r
 | F2 | Lookahead leak | Feature uses actual weather (or `CURRENT_DATE`) instead of the forecast | sqlglot rule in CI; gap between leaky and as-of backtest | Block the merge; write up how much better the leak looked | CI + demo |
 | F3 | Overwritten history | `UPDATE` an ODS row in place | Append-only rule; determinism and replay test | Re-parse from the raw files in Cloud Storage | CI |
 | F4 | Timezone bug | Load UTC timestamps as JST | Sanity check: solar output > 0 at night | Block the run; alert | CI |
-| F5 | Unit change | Read kWh per slot, or 万kW, as MW | Range assertion against capacity | Block the run; alert | CI |
+| F5 | Unit change | Read kWh per slot, or 万kW, as MW | Range assertion against capacity: a ceiling, and a floor on the week's peak, since 万kW read as MW is ten times too small and passes a ceiling | Block the run; alert | CI |
 | F6 | Missing slots | Drop some 30-min actuals | Completeness check per day | Flag and impute; exclude from training labels | CI |
 | F7 | Missing holidays | Remove the holiday calendar | Holiday-segment error spike; calendar completeness check | Restore, re-run backtest | Game day |
 | F8 | Capacity growth drift | Train on an early period only | Rolling bias by horizon | Normalize by capacity; retrain | Game day |
@@ -434,7 +434,7 @@ The forecast runs on the clock and degrades gracefully instead of waiting for la
 
 | When | Checks |
 | --- | --- |
-| At prediction time | Run finished before the deadline; input freshness and completeness; feature drift vs training over 1-, 7- and 30-day windows; output sanity (non-negative, under capacity, quantiles in order, no unexplained jump vs the last run); fallback level used |
+| At prediction time | Run finished before the deadline; input freshness and completeness; feature drift vs training over 1-, 7- and 30-day windows; output sanity (non-negative, under capacity, quantiles in order, no unexplained jump vs the last run; a new capacity release explains up to about 2%); fallback level used |
 | After actuals land | Error by slot and horizon; pinball loss; P10–P90 coverage; bias; champion vs shadow; price-weighted solar error; nightly reproduction of yesterday's run, which must match exactly |
 | Always | Capture freshness per group; export freshness and size; Cloud SQL memory and connections; Dagster run failures; VM health; spend against budget |
 
@@ -524,8 +524,6 @@ The MVP succeeds if the solar model beats persistence in an as-of backtest and t
 - When TEPCO publishes its next-day forecast in the evening (captured twice until known)
 - The real availability delay of each weather model, measured from our captures, to replace the assumed delays
 - Which weather runs cover D's late slots for M2, since short MSM runs end at 21:00 JST on D
-- Source for installed solar capacity in the Tokyo area, for normalization
-- Which Kanto points to use for weather, and how to weight them
 - Retraining cadence for the backtest (weekly or monthly)
 - Repo public (assumed)? Code license: Apache-2.0 or MIT; data stays under each source's terms
 
