@@ -1,5 +1,7 @@
 -- The SQL's sun against NREL's SPA (seeds/sun_reference.csv, written with pvlib): within 0.05°
 -- and 1 W/m² at every reference point and slot, and none of them missing from the model.
+{{ config(meta={'dagster': {'ref': {'name': 'dwd_sun_slots'}}}) }}
+
 select
     r.point,
     r.slot_start,
