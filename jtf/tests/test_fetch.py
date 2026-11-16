@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -303,3 +303,88 @@ def test_other_client_errors_still_fail(tmp_path):
         sleep=lambda _: None,
     )
     assert not result.ok and len(result.failures) == 6
+
+
+# ---------------------------------------------------------------- an index page (FIT/FIP)
+
+FIT_INDEX = """<html><body>
+<a href="https://www.fit-portal.go.jp/servlet/servlet.FileDownload?file=idA2603">A&#34920;&#12288;都道府県別認定・導入量（２０２６年３月末時点）</a>
+<a href="https://www.fit-portal.go.jp/servlet/servlet.FileDownload?file=idB2603">B&#34920;&#12288;市町村別認定・導入量（２０２６年３月末時点）</a>
+<a href="https://www.fit-portal.go.jp/servlet/servlet.FileDownload?file=idA1712">A&#34920;&#12288;都道府県別認定・導入量（２０１７年１２月末時点）</a>
+</body></html>""".encode()
+
+
+def fit_client(page: bytes = FIT_INDEX, seen: list | None = None) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        name = request.url.params.get("file") or request.url.path.rsplit("/", 1)[-1]
+        if seen is not None:
+            seen.append(name)
+        if name == "PublicInfoSummary":
+            return httpx.Response(200, content=page)
+        return httpx.Response(200, content=f"workbook {name}".encode())
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def fit_run(store, mode="daily", days_later=0, **kwargs):
+    return run_source(
+        get_source("meti_fit_capacity"),
+        mode=mode,
+        store=store,
+        now=lambda: FIXED_NOW + timedelta(days=days_later),
+        sleep=lambda _: None,
+        **kwargs,
+    )
+
+
+def test_daily_stores_the_index_page_then_each_linked_release_once(tmp_path):
+    store = LocalStore(tmp_path)
+    first = fit_run(store, client=fit_client())
+    assert first.ok
+    # The 2017-12 link is an .xls release, which is left out.
+    assert sorted(stored_files(store, "meti_fit_capacity")) == [
+        "A_pref202603.xlsx",
+        "B_city202603.xlsx",
+        "PublicInfoSummary.html",
+    ]
+    (a_path,) = stored_files(store, "meti_fit_capacity")["A_pref202603.xlsx"]
+    assert store.get(a_path) == b"workbook idA2603"
+
+    seen = []
+    again = fit_run(store, days_later=1, client=fit_client(seen=seen))
+
+    assert again.ok and seen == ["PublicInfoSummary"]  # the page every day, a release only once
+    assert sorted(again.skipped) == ["A_pref202603.xlsx", "B_city202603.xlsx"]
+    assert len(stored_files(store, "meti_fit_capacity")["PublicInfoSummary.html"]) == 2
+
+
+def test_initial_reads_the_index_again_even_when_a_daily_capture_stored_it(tmp_path):
+    store = LocalStore(tmp_path)
+    assert fit_run(store, client=fit_client()).ok
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/cdx"):
+            return httpx.Response(200, content=b'[["timestamp"], ["20240302210103"]]')
+        if request.url.path.endswith("PublicInfoSummary"):
+            return httpx.Response(200, content=FIT_INDEX)
+        return httpx.Response(200, content=b"archived page")
+
+    history_client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = fit_run(store, mode="initial", days_later=1, client=history_client)
+
+    assert result.ok
+    assert sorted(result.skipped) == ["A_pref202603.xlsx", "B_city202603.xlsx"]
+    names = {p.rsplit("/", 1)[-1].split("_", 1)[1] for p in result.stored}
+    assert names == {
+        "wayback_cdx.json",
+        "PublicInfoSummary.html",
+        "wayback_20240302210103_PublicInfoSummary.html",
+    }
+    (cdx_path,) = stored_files(store, "meti_fit_capacity")["wayback_cdx.json"]
+    assert json.loads(store.get(cdx_path + ".meta.json"))["load_type"] == "initial"
+
+
+def test_an_index_page_that_links_nothing_fails_the_capture(tmp_path):
+    result = fit_run(LocalStore(tmp_path), client=fit_client(page=b"<html>maintenance</html>"))
+    assert not result.ok
+    assert "links no table A or B release" in result.failures[0]

@@ -8,6 +8,7 @@ The design, and a run over every raw file, is in notebooks/02_raw_to_ods.ipynb.
 
 from jtf.parse import (
     jepx,
+    meti_fit,
     openmeteo,
     tepco_actuals,
     tepco_actuals_yearly,
@@ -26,6 +27,7 @@ PARSERS: dict[str, Parser] = {
         *tepco_demand_outlook.PARSERS,
         jepx.PARSER,
         *openmeteo.PARSERS,
+        *meti_fit.PARSERS,
     )
 }
 

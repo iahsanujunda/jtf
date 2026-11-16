@@ -1,0 +1,40 @@
+{
+  "source": "meti_fit_capacity",
+  "filename": "A_pref202603.xlsx",
+  "load_type": "initial",
+  "url": "https://www.fit-portal.go.jp/servlet/servlet.FileDownload",
+  "method": "GET",
+  "params": {
+    "file": "015hA000000lPEH"
+  },
+  "form": {},
+  "if_modified_since": null,
+  "fetched_at": "2026-11-15T00:45:20+00:00",
+  "fetched_at_jst": null,
+  "extraction_date": "2026-11-15",
+  "http_status": 200,
+  "gap": false,
+  "response_headers": {
+    "date": "Sun, 15 Nov 2026 23:15:53 GMT",
+    "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; charset=UTF-8",
+    "content-length": "102151",
+    "connection": "keep-alive",
+    "cache-control": "private",
+    "content-security-policy": "upgrade-insecure-requests",
+    "permissions-policy": "unload=*",
+    "strict-transport-security": "max-age=63072000; includeSubDomains",
+    "x-sfdc-trace-flags": "01",
+    "last-modified": "Tue, 18 Aug 2026 04:42:27 +0000",
+    "content-disposition": "inline; filename=\"A_pref202603.xlsx\"",
+    "x-content-type-options": "nosniff",
+    "vary": "Accept-Encoding",
+    "server": "sfdcedge",
+    "x-sfdc-request-id": "f8d500ecb88c85c8a422ea76233d9c05",
+    "x-request-id": "f8d500ecb88c85c8a422ea76233d9c05",
+    "x-sfdc-edge-cache": "none"
+  },
+  "size_bytes": 16894,
+  "sha256": "14e98ef582581732638a42d42ebf6257d8a7949cc27a9545aabb98b3b9dbd921",
+  "jtf_version": "0.1.0",
+  "image_digest": null
+}

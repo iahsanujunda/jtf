@@ -1,13 +1,16 @@
+import json
 from datetime import UTC, datetime
 
 import pytest
 
+from conftest import FIXTURES
 from jtf.ingest.sources import (
     JST,
     PATIENT,
     SINGLE_RUNS,
     SOURCES,
     fiscal_year,
+    fit_links,
     get_source,
 )
 
@@ -128,3 +131,49 @@ def test_demand_outlook_history_is_every_archive_month_since_april_2022():
     assert months[-1] == "202611_power_usage.zip"
     assert len(months) == 56
     assert filenames("tepco_demand_outlook", "recapture") == months
+
+
+# ---------------------------------------------------------------- FIT/FIP solar capacity
+
+FIT_PAGE_FIXTURE = next(
+    p for p in (FIXTURES / "meti_fit_capacity").rglob("*Z_PublicInfoSummary.html")
+)
+
+
+def test_fit_links_find_every_xlsx_release_on_the_page():
+    items = fit_links(FIT_PAGE_FIXTURE.read_bytes())
+    names = [i.filename for i in items]
+
+    assert len(names) == 66 and len(set(names)) == 66  # 33 quarters of tables A and B
+    assert names[:2] == ["A_pref202603.xlsx", "B_city202603.xlsx"]
+    assert not any(n[6:12] in {"201709", "201712", "201803"} for n in names)  # the .xls ones
+    assert items[0].params == {"file": "015hA000000lPEH"}
+    assert {i.url for i in items} == {"https://www.fit-portal.go.jp/servlet/servlet.FileDownload"}
+
+
+def test_fit_links_fail_loudly_when_the_page_links_nothing():
+    with pytest.raises(ValueError, match="links no table A or B release"):
+        fit_links(b"<html><body>maintenance</body></html>")
+
+
+def test_fit_daily_capture_is_the_page_and_each_linked_release_once():
+    (page,) = get_source("meti_fit_capacity").items(NOW)
+    assert page.filename == "PublicInfoSummary.html" and page.expand is not None
+    linked = page.expand(FIT_PAGE_FIXTURE.read_bytes())
+    assert len(linked) == 66 and all(i.once for i in linked)
+
+
+def test_fit_history_adds_every_archived_copy_of_the_page():
+    cdx, page = get_source("meti_fit_capacity").history(NOW)
+    assert cdx.filename == "wayback_cdx.json" and page.filename == "PublicInfoSummary.html"
+    answer = json.dumps([["timestamp"], ["20181018201547"], ["20240302210103"]]).encode()
+
+    snapshots = cdx.expand(answer)
+
+    assert [s.filename for s in snapshots] == [
+        "wayback_20181018201547_PublicInfoSummary.html",
+        "wayback_20240302210103_PublicInfoSummary.html",
+    ]
+    assert snapshots[1].url == (
+        "https://web.archive.org/web/20240302210103id_/https://www.fit-portal.go.jp/PublicInfoSummary"
+    )

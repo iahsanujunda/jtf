@@ -6,6 +6,8 @@ Three modes:
 - daily: the scheduled capture; always downloads, so every day records what was there
 - initial: the one-off history load; skips what is already stored, so it can stop and resume
 - recapture: checks every file for rewrites with `If-Modified-Since`; stores only what changed
+
+An index item (`FetchItem.expand`) is stored like any file, then its body gives the next items.
 """
 
 from __future__ import annotations
@@ -73,6 +75,7 @@ class Fetched:
     status: int
     cost: float
     gap: bool = False
+    body: bytes = b""
 
 
 class Healthcheck:
@@ -161,6 +164,10 @@ def _content_type(filename: str) -> str:
         return "application/json"
     if filename.endswith(".zip"):
         return "application/zip"
+    if filename.endswith(".html"):
+        return "text/html"
+    if filename.endswith(".xlsx"):
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     return "application/octet-stream"
 
 
@@ -224,7 +231,7 @@ def fetch_item(
         json.dumps(meta, ensure_ascii=False, indent=2).encode(),
         "application/json",
     )
-    return Fetched(stored, response.status_code, cost, gap)
+    return Fetched(stored, response.status_code, cost, gap, body)
 
 
 def stored_files(store: Store, source: str) -> dict[str, list[str]]:
@@ -266,21 +273,29 @@ def run_source(
         raise ValueError(f"{source.name} has no {mode} items; its modes are {source.modes}")
     items = make_items(now())
     budget = max_calls if max_calls is not None else source.call_budget
-    index = stored_files(store, source.name) if mode != "daily" else {}
+    stored: dict[str, list[str]] | None = None
+
+    def index() -> dict[str, list[str]]:
+        nonlocal stored
+        if stored is None:
+            stored = stored_files(store, source.name)
+        return stored
+
     client = client or client_for(source.retry)
     healthcheck = healthcheck or Healthcheck(None)
     result = CaptureResult(source.name, mode)
 
     healthcheck.start()
     last_cost = 0.0
-    for position, item in enumerate(items):
-        if mode == "initial" and item.filename in index:
+    for position, item in enumerate(items):  # an index item appends to `items` as it goes
+        fetch_once = mode == "initial" or (mode == "daily" and item.once)
+        if fetch_once and item.expand is None and item.filename in index():
             result.skipped.append(item.filename)
             continue
         if budget is not None and result.calls_spent + max(last_cost, 1.0) > budget:
             result.stopped = f"call budget of {budget:g} reached"
             break
-        previous = index.get(item.filename) if mode == "recapture" else None
+        previous = index().get(item.filename) if mode == "recapture" else None
         try:
             fetched = fetch_item(
                 item,
@@ -302,6 +317,8 @@ def run_source(
                 result.stored.append(fetched.stored)
             else:
                 result.unchanged.append(item.filename)
+            if item.expand is not None and fetched.stored:
+                items.extend(item.expand(fetched.body))
         except QuotaExhausted as e:
             result.stopped = str(e)
             break

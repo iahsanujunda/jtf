@@ -8,13 +8,21 @@ A source can provide three lists of items:
 - `items`: what the daily scheduled capture fetches
 - `history`: what the one-off initial load fetches
 - `recapture`: what the periodic re-capture checks for rewrites, with `If-Modified-Since`
+
+Most items are built from name patterns and dates. One source can't be: the FIT/FIP disclosure
+links its files by unguessable ids, so its index page is an item whose stored body expands into
+the next items (`FetchItem.expand`). Capture reads that page for links only, never a data file.
 """
 
 from __future__ import annotations
 
+import json
+import re
+import unicodedata
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta, timezone
+from html import unescape
 
 JST = timezone(timedelta(hours=9), name="JST")
 
@@ -25,8 +33,13 @@ JEPX_SPOT_PAGE = "https://www.jepx.jp/electricpower/market-data/spot/"
 OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_PREVIOUS_RUNS = "https://previous-runs-api.open-meteo.com/v1/forecast"
 OPEN_METEO_SINGLE_RUNS = "https://single-runs-api.open-meteo.com/v1/forecast"
+FIT_PAGE = "https://www.fit-portal.go.jp/PublicInfoSummary"
+FIT_FILE = "https://www.fit-portal.go.jp/servlet/servlet.FileDownload"
+WAYBACK_CDX = "https://web.archive.org/cdx/search/cdx"
+WAYBACK = "https://web.archive.org/web"
 
-# One point per prefecture in the TEPCO area, equal weights for now (phase 1 decision).
+# One point per prefecture in the TEPCO area. Their weights are each prefecture's share of solar
+# capacity as of T, derived in the warehouse (notebooks/03_solar_capacity.ipynb, section 8).
 WEATHER_POINTS: tuple[tuple[str, float, float], ...] = (
     ("tokyo", 35.69, 139.69),
     ("yokohama", 35.44, 139.64),
@@ -70,6 +83,9 @@ TEPCO_YEARLY_FISCAL_YEARS = range(2016, 2024)
 JEPX_FROM_FISCAL_YEAR = 2016
 PREVIOUS_RUNS_FROM = date(2024, 1, 1)
 SINGLE_RUNS_FROM = date(2026, 4, 2)
+# FIT/FIP releases published as .xls (the older Excel format), which the parser doesn't read; every
+# other release since June 2017 is .xlsx (notebooks/03_solar_capacity.ipynb, section 4).
+FIT_XLS_RELEASES = frozenset({"201709", "201712", "201803"})
 
 
 @dataclass(frozen=True)
@@ -81,6 +97,10 @@ class FetchItem:
     params: dict[str, str] = field(default_factory=dict)
     form: dict[str, str] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
+    expand: Callable[[bytes], list[FetchItem]] | None = field(default=None, compare=False)
+    """An index page: once stored, its body gives the items to fetch next. Always fetched."""
+    once: bool = False
+    """Fetched only if no file of this name is stored yet, even by the daily capture."""
 
 
 @dataclass(frozen=True)
@@ -323,6 +343,71 @@ def _single_runs_history(now: datetime) -> list[FetchItem]:
     return items
 
 
+# ---------------------------------------------------------------- FIT/FIP solar capacity
+
+_FIT_LINK = re.compile(r'<a[^>]+href="[^"]*[?&]file=(\w+)"[^>]*>(.*?)</a>', re.S)
+_FIT_LABEL = re.compile(r"([AB])表.*\((\d{4})年(\d{1,2})月末時点\)")
+_FIT_NAMES = {"A": "A_pref{}.xlsx", "B": "B_city{}.xlsx"}
+
+
+def fit_links(page: bytes) -> list[FetchItem]:
+    """Every table A and B release the summary page links, named as the server names them.
+
+    Raises if the page links none: its layout changed, and the capture should fail loudly.
+    """
+    items = []
+    for file_id, inner in _FIT_LINK.findall(page.decode("utf-8", "replace")):
+        label = unicodedata.normalize("NFKC", unescape(re.sub(r"<[^>]+>", "", inner)))
+        if match := _FIT_LABEL.search(label):
+            month = f"{match[2]}{int(match[3]):02d}"
+            if month not in FIT_XLS_RELEASES:
+                name = _FIT_NAMES[match[1]].format(month)
+                item = FetchItem("meti_fit_capacity", name, FIT_FILE, params={"file": file_id})
+                items.append(item)
+    if not items:
+        raise ValueError("the FIT/FIP summary page links no table A or B release")
+    return items
+
+
+def _fit_page(expand: Callable[[bytes], list[FetchItem]]) -> FetchItem:
+    return FetchItem("meti_fit_capacity", "PublicInfoSummary.html", FIT_PAGE, expand=expand)
+
+
+def _fit_daily(_now: datetime) -> list[FetchItem]:
+    """The page every day (its notices date each release), and any release not stored yet."""
+    return [_fit_page(lambda page: [replace(i, once=True) for i in fit_links(page)])]
+
+
+def _wayback_snapshots(cdx: bytes) -> list[FetchItem]:
+    """Archived copies of the summary page: the only record of when old releases were announced."""
+    stamps = [row[0] for row in json.loads(cdx)[1:]]
+    return [
+        FetchItem(
+            "meti_fit_capacity",
+            f"wayback_{stamp}_PublicInfoSummary.html",
+            f"{WAYBACK}/{stamp}id_/{FIT_PAGE}",
+        )
+        for stamp in stamps
+    ]
+
+
+def _fit_history(_now: datetime) -> list[FetchItem]:
+    cdx = FetchItem(
+        "meti_fit_capacity",
+        "wayback_cdx.json",
+        WAYBACK_CDX,
+        params={
+            "url": "fit-portal.go.jp/PublicInfoSummary",
+            "output": "json",
+            "fl": "timestamp",
+            "filter": "statuscode:200",
+            "collapse": "digest",
+        },
+        expand=_wayback_snapshots,
+    )
+    return [cdx, _fit_page(fit_links)]
+
+
 # ---------------------------------------------------------------- registry
 
 
@@ -368,6 +453,7 @@ SOURCES: dict[str, Source] = {
             is_gap=missing_run,
         ),
         Source("jepx_spot", items=_jepx_daily, history=_jepx_history),
+        Source("meti_fit_capacity", items=_fit_daily, history=_fit_history),
     )
 }
 

@@ -20,7 +20,11 @@ STORE = LocalStore(FIXTURES)
 
 
 def fixture(source, name):
-    (path,) = [p for p in STORE.list(f"{source}/{DAY}/") if p.endswith(f"_{name}")]
+    (path,) = [
+        p
+        for p in STORE.list(f"{source}/{DAY}/")
+        if not p.endswith(".meta.json") and p.rsplit("/", 1)[-1].split("_", 1)[1] == name
+    ]
     return read_raw(STORE, path)
 
 
@@ -210,3 +214,87 @@ def test_a_recorded_gap_gives_a_manifest_row_and_no_rows(tmp_path, warehouse):
     assert result.gaps == [path] and result.ok
     assert warehouse.rows("openmeteo_single_runs").empty
     assert list(warehouse.rows(MANIFEST)["status"]) == ["gap"]
+
+
+# ---------------------------------------------------------------- FIT/FIP solar capacity
+
+
+def workbook_edit(raw, edit):
+    """Change a cell of an .xlsx fixture and return the file with its new bytes."""
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(raw.body))
+    edit(wb)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return RawFile(raw.path, raw.meta, buffer.getvalue())
+
+
+def test_fit_release_is_semi_long_with_the_month_unpacked_from_its_name():
+    raw = fixture("meti_fit_capacity", "A_pref202603.xlsx")
+    rows = PARSERS["meti_fit_capacity_pref"].parse(raw)
+
+    assert set(rows["ref_date"].astype(str)) == {"2026-03-31"}
+    assert rows["sheet"].nunique() == 6
+    total = rows[
+        (rows["area"] == "合計")
+        & (rows["sheet"] == "表A②－１")
+        & (rows["path"] == "太陽光発電設備/10kW未満")
+    ]
+    # The page says 1,290.4万kW: the values are kW, as found.
+    assert total["value"].item() == pytest.approx(12_904_323.7, abs=1)
+    assert "太陽光発電設備/10kW以上/うち50kW未満" in set(rows["path"])
+    assert PARSERS["meti_fit_capacity_pref"].check(rows) == []
+
+
+def test_fit_municipality_table_keeps_shizuoka_by_municipality():
+    raw = fixture("meti_fit_capacity", "B_city202603.xlsx")
+    rows = PARSERS["meti_fit_capacity_city"].parse(raw)
+    assert {"静岡県富士市", "静岡県静岡市", "静岡県市町村不明", "合計"} <= set(rows["area"])
+
+
+@pytest.mark.parametrize(
+    ("edit", "reason"),
+    [
+        (lambda wb: wb["表A②－１"].cell(4, 2, "10kW以下"), "header paths of sheet 表A②－１"),
+        (lambda wb: setattr(wb["表A③"], "title", "表A⑤"), "sheets are"),
+        (lambda wb: wb["表A④"].cell(1, 1, "【表A ④】別の表"), "sheet 表A④ has the title"),
+        (lambda wb: wb["表A①－１"].cell(6, 2, "-"), "non-number"),
+    ],
+)
+def test_fit_release_with_another_shape_is_refused(edit, reason):
+    raw = fixture("meti_fit_capacity", "A_pref202603.xlsx")
+    with pytest.raises(Refused, match=reason):
+        PARSERS["meti_fit_capacity_pref"].parse(workbook_edit(raw, edit))
+
+
+def test_fit_release_that_is_not_xlsx_is_refused():
+    raw = fixture("meti_fit_capacity", "A_pref202603.xlsx")
+    old_excel = edited(raw, lambda _body: b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 64)
+    with pytest.raises(Refused, match="not an .xlsx workbook"):
+        PARSERS["meti_fit_capacity_pref"].parse(old_excel)
+
+
+def test_fit_notices_read_every_announcement_on_the_live_page():
+    rows = PARSERS["meti_fit_notices"].parse(fixture("meti_fit_capacity", "PublicInfoSummary.html"))
+
+    notices = rows[rows["kind"] == "notice"]
+    announced = notices["announced"].astype(str)
+    assert dict(zip(notices["ref_date"].astype(str), announced, strict=True)) == {
+        "2026-03-31": "2026-08-18",
+        "2025-12-31": "2026-06-04",
+        "2025-09-30": "2026-03-19",
+        "2025-06-30": "2025-12-09",
+    }
+    (heading,) = rows[rows["kind"] == "heading"].itertuples()
+    assert (str(heading.ref_date), str(heading.announced)) == ("2026-03-31", "2026-08-18")
+    assert rows["source_time"].isna().all()  # the live page sends no Last-Modified
+
+
+def test_fit_notices_of_an_archived_copy_carry_when_the_archive_took_it():
+    raw = fixture("meti_fit_capacity", "wayback_20240302210103_PublicInfoSummary.html")
+    rows = PARSERS["meti_fit_notices"].parse(raw)
+
+    assert set(rows["source_time"]) == {pd.Timestamp("2024-03-02 21:01:03", tz="UTC")}
+    newest = rows[rows["ref_date"].astype(str) == "2023-09-30"]
+    assert set(newest["announced"].astype(str)) == {"2024-02-06"}

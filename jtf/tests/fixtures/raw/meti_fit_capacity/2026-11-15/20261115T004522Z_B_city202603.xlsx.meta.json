@@ -1,0 +1,40 @@
+{
+  "source": "meti_fit_capacity",
+  "filename": "B_city202603.xlsx",
+  "load_type": "initial",
+  "url": "https://www.fit-portal.go.jp/servlet/servlet.FileDownload",
+  "method": "GET",
+  "params": {
+    "file": "015hA000000lMYB"
+  },
+  "form": {},
+  "if_modified_since": null,
+  "fetched_at": "2026-11-15T00:45:22+00:00",
+  "fetched_at_jst": null,
+  "extraction_date": "2026-11-15",
+  "http_status": 200,
+  "gap": false,
+  "response_headers": {
+    "date": "Sun, 15 Nov 2026 23:15:56 GMT",
+    "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; charset=UTF-8",
+    "content-length": "1776695",
+    "connection": "keep-alive",
+    "strict-transport-security": "max-age=63072000; includeSubDomains",
+    "vary": "Accept-Encoding",
+    "content-security-policy": "upgrade-insecure-requests",
+    "x-sfdc-trace-flags": "01",
+    "content-disposition": "inline; filename=\"B_city202603.xlsx\"",
+    "permissions-policy": "unload=*",
+    "cache-control": "private",
+    "last-modified": "Tue, 18 Aug 2026 04:42:52 +0000",
+    "x-content-type-options": "nosniff",
+    "server": "sfdcedge",
+    "x-sfdc-request-id": "14e3adc30673b3002f84bc936aa1bbe2",
+    "x-request-id": "14e3adc30673b3002f84bc936aa1bbe2",
+    "x-sfdc-edge-cache": "none"
+  },
+  "size_bytes": 15849,
+  "sha256": "cc7a7c935e0f31559a73ea7d7c9ba2892ff204b002ed3c83d7a048fb637bf6a8",
+  "jtf_version": "0.1.0",
+  "image_digest": null
+}

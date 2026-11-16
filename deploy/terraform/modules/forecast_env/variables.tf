@@ -39,8 +39,9 @@ variable "capture_sources" {
     tepco_area_forecast_next_day = { schedule = "0 19,22 * * *", task_retries = 1 }
     tepco_area_bg_plan_next_day  = { schedule = "0 19,22 * * *", task_retries = 1 }
     # Connections from Cloud Run to Open-Meteo sometimes fail to open; a fresh container succeeds.
-    openmeteo_live = { schedule = "45 8 * * *", task_retries = 3 }
-    jepx_spot      = { schedule = "0 11 * * *", task_retries = 1 }
+    openmeteo_live    = { schedule = "45 8 * * *", task_retries = 3 }
+    jepx_spot         = { schedule = "0 11 * * *", task_retries = 1 }
+    meti_fit_capacity = { schedule = "45 8 * * *", task_retries = 1 }
     # TEPCO rewrites old months, occasionally in bulk; check every monthly file once a month.
     tepco_actuals_recapture = {
       source       = "tepco_actuals"

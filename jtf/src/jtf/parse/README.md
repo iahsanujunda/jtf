@@ -13,6 +13,7 @@ Raw files to ODS rows, one parser per file layout. The design, and a run over ev
 | `tepco_demand_outlook.py` | `juyo-d1-j.csv` and its monthly archive zips → `ods.tepco_demand_outlook_peaks`, `_hourly`, `_5min`, one table per block shape |
 | `jepx.py` | `spot_summary_{FY}.csv` → `ods.jepx_spot` |
 | `openmeteo.py` | Previous Runs, Single Runs and live JSON → `ods.openmeteo_*`, semi-long |
+| `meti_fit.py` | FIT/FIP tables A and B (`.xlsx`, six sheets) → `ods.meti_fit_capacity_pref`, `_city`, semi-long, with `ref_date` from the file name; every copy of the summary page, live or archived → `ods.meti_fit_notices` |
 | `load.py` | `parse_day`: one source's files for one extraction day, once per parser version; the `raw_files` manifest |
 | `bigquery.py` | The ODS dataset: append-only loads, and the queries that say what is already loaded |
 

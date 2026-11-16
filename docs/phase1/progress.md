@@ -9,7 +9,7 @@
 | 1. Capture | **Done.** 11 Cloud Run jobs in prod: one per scheduled source (9) and the 2 monthly re-captures, each pinging its own healthchecks.io check. The two history-only Open-Meteo sources run as one-off executions of the `openmeteo_live` job |
 | 2. Initial history load | **Done except Single Runs.** TEPCO actuals, JEPX, Previous Runs and the demand outlook's archive are loaded. Single Runs: 819 of about 1,370 runs; the rest is waiting on Open-Meteo's daily quota |
 | 3. Dagster, locally | **Done.** Raw assets with the bucket sensor, freshness policies, extraction-day partitions, `ods/tepco_actuals` with automation. On 2026-11-16 the automation daemon parsed the 08:45 capture on its own at 08:47 (2 files, 2,225 rows) |
-| 5. Parse (first half) | **Done early.** All 14 parsers are in `jtf/src/jtf/parse/`, proven on every raw file, and all 15 ODS tables are loaded in dev BigQuery. Only `tepco_actuals` is orchestrated so far |
+| 5. Parse (first half) | **Done early, plus capacity.** 17 parsers in `jtf/src/jtf/parse/`, each proven on every raw file; 15 ODS tables loaded in dev BigQuery. The capacity source's three (notebook 03) are built and proven on every release, not yet deployed. Only `tepco_actuals` is orchestrated so far |
 | 4, 5 (dbt), 6–9 | Not started |
 
 ## Next, in order
@@ -20,7 +20,7 @@
    ```
    It writes to extraction day 2026-11-16. Parse it with `jtf parse --source openmeteo_single_runs --from 2026-11-16`, or let Dagster do it once Single Runs is orchestrated
 2. **Strap the other 13 parsers into Dagster:** add their tables to `ORCHESTRATED` in [orchestration/ods.py](../../jtf/src/jtf/orchestration/ods.py). New captures of every source are then parsed on their own. Days already loaded with `jtf parse` are skipped by the manifest
-3. **Step 5 along the solar path first.** Notebook 03 (solar capacity) is written; once you've read what it made known, the PRD and the phase-1 plan are updated to match. Then the capacity source's capture job, parsers and ODS tables, as its design section says; then notebook 04, versions and `known_at` on real rows of the solar tables. Then dbt DWD for the tables the solar forecast reads (TEPCO actuals, Previous Runs, Single Runs, TEPCO's next-day forecast as the benchmark), the `as_of` macro, DWS solar features and SQL rules in CI. The other tables stay in ODS until a feature needs them
+3. **Step 5 along the solar path first.** The capacity source is built and proven: capture `meti_fit_capacity` (the summary page daily, each linked release once, the Wayback copies in its initial load), three parsers, 18 ODS tables in all. Next for it: release the image, apply Terraform (the new job), run its initial load, `jtf parse --source meti_fit_capacity`, then orchestrate. Then notebook 04, versions and `known_at` on real rows of the solar tables. Then dbt DWD (with the `known_at` unit tests, the late-backfill case included), the `as_of` macro, DWS solar features and SQL rules in CI. The other tables stay in ODS until a feature needs them
 4. **Step 6, the time machine:** replay, and the determinism and future-poison tests
 5. **Step 7, the model:** baselines (persistence, TEPCO's forecast), one quantile model, a rolling backtest; skill above persistence on daylight slots
 6. **Step 8:** the F2 leak scenario and its write-up, then F1
@@ -30,7 +30,6 @@
 ## Waiting on you
 
 - **healthchecks.io:** set the cron and grace time of each check once it exists: the 9 daily ones (15 minutes' grace for 08:45 sources, 30 for the others), `jtf-tepco-actuals-recapture` (`30 9 1 * *`) and, after its first ping on 1 December, `jtf-tepco-demand-outlook-recapture` (`40 9 1 * *`); delete the old `jtf-morning`, `jtf-jepx` and `jtf-evening`. Skip what is already done
-- **Read notebook 03's "What this exploration made known"** ([notebook](../../notebooks/03_solar_capacity.ipynb)) and push back on any "So"; the PRD and the phase-1 plan are then updated to match
 
 ## What runs where
 
@@ -128,4 +127,5 @@ Local settings live in gitignored files: `.env` (`JTF_RAW_URL` is the prod raw b
 | 2026-11-16 morning | Guards on the raw bucket (applied); the order of the remaining steps: the solar path through steps 5–8 first, the release path when a step finishes early, Dagster in prod last |
 | 2026-11-16 08:47 | Automation parsed the 08:45 capture on its own: step 3 done |
 | 2026-11-16 morning | Notebooks end with what the exploration made known, never with decisions (01–03 rewritten) |
+| 2026-11-16 morning | Notebook 03 agreed; the PRD and phase-1 plan updated to match, and the backfill tests written into steps 5 and 6. The capacity source built: capture with an index page, three parsers, tests (89 passing); a real capture into a scratch store took 120 files and the daily one skipped all 66 releases |
 | 2026-11-16 morning | Notebook 03, solar capacity: METI's FIT/FIP disclosure verified as the source; the figure is 4.0–8.6 months old when used; the page's own publication dates were revised after the fact |
