@@ -21,15 +21,16 @@
    ```
    Both write to extraction day 2026-11-16. Parse them with `jtf parse --source openmeteo_previous_runs --from 2026-11-16` and the same for `openmeteo_single_runs`, then re-run notebook 04, whose seam table should show weather for every target day
 2. **Strap the other 16 parsers into Dagster:** add their tables to `ORCHESTRATED` in [orchestration/ods.py](../../jtf/src/jtf/orchestration/ods.py). New captures of every source are then parsed on their own. Days already loaded with `jtf parse` are skipped by the manifest
-3. **Step 5 along the solar path first.** The capacity source is live: the `jtf-fetch-meti-fit-capacity` job captures daily at 08:45, its initial load is in the raw bucket (120 files) and parsed into dev BigQuery (`meti_fit_capacity_pref` 291,456 rows, `_city` 10,868,696, `meti_fit_notices` 255; the TEPCO-area figure for March 2026 rebuilt in SQL gives notebook 03's 20.58 GW). Notebook 04 (ODS to DWD in SQL) is written; once you've read what it made known, the plan is updated to match. Then dbt DWD (with the `known_at` unit tests, the late-backfill case included), the `as_of` macro, DWS solar features and SQL rules in CI. The other tables stay in ODS until a feature needs them
-4. **Step 6, the time machine:** replay, and the determinism and future-poison tests
-5. **Step 7, the model:** baselines (persistence, TEPCO's forecast), one quantile model, a rolling backtest; skill above persistence on daylight slots
+3. **Step 5, warehouse and walking skeleton** ([order of work](README.md#order-of-work)): the dbt project; DWD for the solar path as notebook 04 designed it, and capacity as notebook 03 did; the `as_of` macro with the `known_at` unit tests (the late-backfill case from notebook 04 among them); a minimal DWS (D−2 output, clear-sky output, the capacity estimate); the persistence baseline in a rolling backtest, metrics in local MLflow; all as Dagster assets in `dagster dev`. Done when the lineage runs from raw files to the baseline's metrics
+4. **Step 6, the time machine, on the skeleton:** replay, and the determinism, future-poison and backfill-stability tests
+5. **Step 7, features and model:** notebook 05 on top of DWS through `as_of` (the label on curtailed slots, clear-sky index, capacity-weighted weather, the quality checks behind F4 and F6); each feature that earns its place becomes a DWS model; the clear-sky × ratio baseline and the TEPCO benchmark; M1 quantile models; skill above persistence on daylight slots
 6. **Step 8:** the F2 leak scenario and its write-up, then F1
 7. **The release path**, whenever a step finishes early: a `release.yml` that builds the image and points the jobs at its digest, through the `ci-release` service account and WIF (both exist from bootstrap); branch protection on `main`, so that changes reach prod only through a PR as the PRD says; the GitHub Actions version bumps behind the Node 20 warnings; a decision on the image size (now 1.0 GB, see [Known issues](#known-issues))
-8. **Step 4, Dagster in prod, last:** the platform module (VM, Cloud SQL, IAP, NAT), the compose deployment, and the `jtf-dagster` heartbeat. Until then, Dagster runs locally against dev BigQuery
+8. **Step 4, Dagster in prod, last:** the prod BigQuery datasets and the VM's service account; the platform module (VM, Cloud SQL, IAP, NAT), the compose deployment, the `jtf-dagster` heartbeat, and a one-off backfill of the partitions recorded before the assets existed. Until then, Dagster runs locally against dev BigQuery
 
 ## Waiting on you
 
+- **Read notebook 04's "What this exploration made known"** and push back on any "So"; the plan is then updated to match (the DWD models of step 5 follow it)
 - **healthchecks.io:** set the cron and grace time of each check once it exists (`jtf-meti-fit-capacity` appears with its first daily ping, on 2026-11-17 at 08:45; 15 minutes' grace): the 9 daily ones (15 minutes' grace for 08:45 sources, 30 for the others), `jtf-tepco-actuals-recapture` (`30 9 1 * *`) and, after its first ping on 1 December, `jtf-tepco-demand-outlook-recapture` (`40 9 1 * *`); delete the old `jtf-morning`, `jtf-jepx` and `jtf-evening`. Skip what is already done
 
 ## What runs where
@@ -128,6 +129,7 @@ Local settings live in gitignored files: `.env` (`JTF_RAW_URL` is the prod raw b
 | 2026-11-16 morning | Guards on the raw bucket (applied); the order of the remaining steps: the solar path through steps 5–8 first, the release path when a step finishes early, Dagster in prod last |
 | 2026-11-16 08:47 | Automation parsed the 08:45 capture on its own: step 3 done |
 | 2026-11-16 morning | Notebooks end with what the exploration made known, never with decisions (01–03 rewritten) |
+| 2026-11-16 midday | The plan's order of work: facts and `as_of` first, a walking skeleton end to end, features graduating one at a time, Dagster in prod last; steps 5 and 7 rewritten to match |
 | 2026-11-16 late morning | Notebook 04: DWD in SQL over the solar tables; `as_of` as a range join over all 1,005 decision times; a two-day weather gap found at capture start |
 | 2026-11-16 09:50 | The capacity source released: image `e887411` on all 12 jobs, the new job and its 08:45 schedule, its initial load (120 files) and parse (18 ODS tables in dev) |
 | 2026-11-16 morning | Notebook 03 agreed; the PRD and phase-1 plan updated to match, and the backfill tests written into steps 5 and 6. The capacity source built: capture with an index page, three parsers, tests (89 passing); a real capture into a scratch store took 120 files and the daily one skipped all 66 releases |

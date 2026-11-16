@@ -1,6 +1,6 @@
 # Phase 1: MVP
 
-**Goal:** a Tokyo-area solar forecast built only from what was known at decision time, a time machine that proves it, and a measured account of what a lookahead leak does to a backtest. Two things run in prod from early on: the capture job, because some source data cannot be fetched later, and Dagster, so every capture and every pipeline run is visible from the start. Feature and model work happens in `dagster dev` on the laptop against the dev project.
+**Goal:** a Tokyo-area solar forecast built only from what was known at decision time, a time machine that proves it, and a measured account of what a lookahead leak does to a backtest. The capture job runs in prod from the start, because some source data cannot be fetched later. Everything after it is rebuilt from the raw files, so it is built in `dagster dev` on the laptop against the dev project, end to end first and richer after, and moves to prod Dagster last (step 4).
 
 This is the working plan for phase 1 and is meant to be complete on its own. The [PRD](../prd.md) holds the overall design and the later phases. Where the work stands right now is in [progress.md](progress.md).
 
@@ -28,12 +28,35 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 | 1 | **Capture, this week** | Repo skeleton (uv, `jtf` CLI, Dockerfile, Makefile, `ci.yml`); `deploy/bootstrap` (APIs, state bucket, WIF, CI service accounts, budget, importing the hand-made budget) behind `make bootstrap`; every account-specific value as a Terraform variable, with `terraform.tfvars.example` files; `storage` module; `jtf fetch` for every source; Terraform for the prod capture slice, one job and schedule per source; `release.yml` that builds the image and points the jobs at its digest; one healthchecks.io check per source | Every source's scheduled run lands files and sidecars in the prod raw bucket; a skipped or failed run alerts on that source's check |
 | 2 | Initial history load | `jtf fetch --source S --initial` for the history sources, run as one-off executions of the capture jobs: quota-aware pacing, resumable, tagged `initial`; the daily previous-month capture and the monthly re-capture (see [Learned improvements](#learned-improvements-from-the-history-probe)) | Raw files for every range in [Initial load](#initial-load); a re-run fetches nothing already stored |
 | 3 | **Dagster, locally** | `jtf/src/jtf/orchestration`: raw external assets with the bucket sensor, freshness checks per source, partition definitions, the first parse asset (TEPCO actuals) into dev ODS, automation on its downstream; `dagster dev` reading the prod raw bucket read-only | The local UI shows each source's captures per day with freshness checks, and a new capture starts the TEPCO parse on its own |
-| 4 | **Dagster, in prod** | Terraform `platform` module: `e2-medium` VM without a public IP, Cloud NAT, IAP firewall rule, Cloud SQL `db-f1-micro` (Enterprise, Tokyo); `deploy/dagster`: `compose.prod.yaml` (webserver, daemon, code location by digest, Cloud SQL Auth Proxy) and `dagster.prod.yaml` (Postgres storage, Docker run launcher, pool limits); `release.yml` also points the code location at the new digest; a heartbeat schedule that pings the healthchecks.io check `jtf-dagster` every 15 minutes, and a run-failure sensor that sends failed runs to its `/fail` | Through an IAP tunnel, the prod UI shows every capture and the initial load with freshness checks green, and new captures are parsed into prod ODS on their own. A stopped capture shows up both as a failed freshness check and as a healthchecks.io alert. A stopped Dagster daemon raises the `jtf-dagster` alert within 30 minutes |
-| 5 | Parse and warehouse | Every parser as an ODS asset (the parsers themselves were written during step 3, proven on every raw file and loaded with `jtf parse`); dbt DWD with versions, MW and JST slots; the `as_of` macro; DWS solar features partitioned by decision date; SQL rules in CI. Each piece is built in `dagster dev`, then released, and runs in prod from then on | dbt tests pass; one known day checked by hand against the source files; the prod lineage graph runs from raw files to DWS |
-| 6 | Time machine | Replay job (`mode`, `T` range, `fault` in run config) and `jtf replay`; run records in ADS; determinism and future-poison tests | The determinism, future-poison and backfill-stability tests green in CI |
-| 7 | Model | Baselines, the TEPCO benchmark, M1 quantile models, rolling backtest, metrics by segment, MLflow logging; backtest and train jobs launched in `dagster dev` | Skill above 0 vs persistence on daylight slots |
+| 4 | **Dagster, in prod** (last: see [Order of work](#order-of-work)) | The prod BigQuery datasets and a service account for the VM that reads the raw bucket and writes them; Terraform `platform` module: `e2-medium` VM without a public IP, Cloud NAT, IAP firewall rule, Cloud SQL `db-f1-micro` (Enterprise, Tokyo); `deploy/dagster`: `compose.prod.yaml` (webserver, daemon, code location by digest, Cloud SQL Auth Proxy) and `dagster.prod.yaml` (Postgres storage, Docker run launcher, pool limits); `release.yml` also points the code location at the new digest; a heartbeat schedule that pings the healthchecks.io check `jtf-dagster` every 15 minutes, and a run-failure sensor that sends failed runs to its `/fail`; a one-off backfill of the partitions recorded before the assets existed, which automation never runs | Through an IAP tunnel, the prod UI shows every capture and the initial load with freshness checks green, and new captures are parsed into prod ODS on their own. A stopped capture shows up both as a failed freshness check and as a healthchecks.io alert. A stopped Dagster daemon raises the `jtf-dagster` alert within 30 minutes |
+| 5 | **Warehouse and walking skeleton** | Every parser as an ODS asset (the parsers themselves were written during step 3, proven on every raw file and loaded with `jtf parse`); the dbt project with DWD for the solar path as [notebook 04](../../notebooks/04_ods_to_dwd.ipynb) designed it (versions, `known_at` with `basis` and `known_until`, MW, JST slots) and capacity as [notebook 03](../../notebooks/03_solar_capacity.ipynb) did; the `as_of` macro with the `known_at` unit tests; a first, minimal DWS (D−2 same-slot output, clear-sky output, the capacity estimate); the persistence baseline scored by a rolling backtest, with metrics in local MLflow; all of it as Dagster assets in `dagster dev` against dev BigQuery; SQL rules in CI | `dbt build` and the `known_at` unit tests pass in CI; one known day checked by hand against the source files; in `dagster dev`, the lineage runs from raw files to the persistence baseline's backtest metrics |
+| 6 | Time machine | On the walking skeleton: replay job (`mode`, `T` range, `fault` in run config) and `jtf replay`; run records in ADS; determinism and future-poison tests | The determinism, future-poison and backfill-stability tests green in CI |
+| 7 | Features and model | Notebook 05 on top of DWS, read through `as_of`: the label on curtailed slots, clear-sky index, capacity-weighted weather, the data quality behind F4 and F6; each feature that earns its place becomes a DWS model with its tests; the clear-sky × ratio baseline; the TEPCO benchmark; M1 quantile models; metrics by segment; backtest and train jobs launched in `dagster dev` | Skill above 0 vs persistence on daylight slots |
 | 8 | Fault scenarios | F2 and F1 run-config presets, replays and write-ups | Write-ups follow the template, with the expected outcome written first |
 | 9 | README | Root README (quick start, contributing); design and results with fidelity; status; a LICENSE | Someone new can follow it |
+
+### Order of work
+
+Steps 1–3 are done. The rest runs in this order, not by number:
+
+1. **Step 5**, foundation first: DWD and `as_of` with their tests, then the walking skeleton, the whole chain from raw files to a backtest with the simplest model, as early as possible
+2. **Step 6**, the time machine, on the skeleton
+3. **Step 7**, features and the model, each feature graduating into DWS
+4. **Step 8**, the fault scenarios
+5. **The release path**, whenever a step finishes early: `release.yml` (planned in step 1, not built yet), branch protection on `main`, the image's size and cleanup policy. Step 4 needs it
+6. **Step 4**, Dagster in prod, once the chain runs end to end in `dagster dev`
+7. **Step 9**, the README
+
+### From exploration to production
+
+How a notebook's finding becomes pipeline code, so nothing is written twice and training and serving never diverge:
+
+- **Facts and time first.** DWD (versions, `known_at`, units, slots) and the `as_of` macro are built before any feature, with their tests: a leak there would invalidate every backtest built on top
+- **A walking skeleton early.** The whole chain end to end with trivially simple content (three features, the persistence baseline, a backtest), so the pipeline is exercised from the start and the time machine has something to test
+- **Explore on top of the pipeline, not beside it.** From notebook 05 on, notebooks read the dbt models through `as_of`, so exploration can't leak either. Exploratory SQL is written the way dbt will run it (notebook 04), so a finding moves into a model without a rewrite
+- **Features graduate one at a time.** A feature that earns its place becomes a DWS model with its tests; the notebook keeps the reasoning, the logic lives only in dbt. No feature logic in pandas
+- **One feature table.** Backtests read DWS for past decision times, the live forecast reads it for today: one definition, no train/serve skew
+- **CI decides.** `dbt build`, its tests and the SQL rules run on every change before anything reaches prod
 
 ## Data
 
@@ -272,6 +295,7 @@ Each write-up uses the [template](../scenarios/README.md), with the expected out
 | Every captured file as a table | Done: an ODS table for every captured file (18 with the capacity source's three), the yearly actuals and the demand outlook included, for feature exploration | 5 |
 | Demand outlook history | Done: TEPCO's monthly archive (`YYYYMM_power_usage.zip`, April 2022 on) as the source's `initial` items, the last two months in its daily capture, and a monthly re-capture ([notebook 02](../../notebooks/02_raw_to_ods.ipynb), section 12.2) | 5 |
 | Training window | Done: target days from 2024-02-17; later weather holes fall back to ECMWF at the same lead | 7 |
+| Order of work | Done: facts and `as_of` first, then a walking skeleton end to end, then features graduating one at a time; Dagster in prod last ([Order of work](#order-of-work)) | 5 |
 | VM size | `e2-medium`; resize if runs need more memory | 4 |
 | Dagster UI access | IAP tunnel; Tailscale is the alternative if the tunnel gets tedious | 4 |
 | Solar capacity estimate | Done: METI's FIT/FIP disclosure, tables A and B, captured daily with its summary page; `known_at` from the latest announcement date any stored copy of the page showed; extended to D by the trend through the newest four known releases ([notebook 03](../../notebooks/03_solar_capacity.ipynb)) | 5 |
