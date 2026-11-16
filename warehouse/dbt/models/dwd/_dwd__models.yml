@@ -1,0 +1,147 @@
+version: 2
+
+models:
+  - name: dwd_tepco_actuals
+    description: >
+      TEPCO's monthly area actuals as versions: one row per slot, measure and version, in MW
+      averaged over the slot. Read for a decision time only through `as_of`. The yearly files are
+      another model, off the training path (notebook 04, section 2.3).
+    columns:
+      - name: slot_start
+        description: The slot's start, as a timestamp (TEPCO labels slots by their start, in JST).
+        data_tests: [not_null]
+      - name: measure
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [solar, solar_curtailed, wind]
+      - name: value_mw
+        description: MW averaged over the slot; null where the file had no value.
+      - name: known_at
+        description: When we could have had this version. Never the parse time.
+        data_tests: [not_null]
+      - name: known_until
+        description: When the next version became known; null for the current one.
+      - name: basis
+        description: >
+          `rule` (slot end + 1 hour, before capture start) or `captured` (the fetch time of the
+          first file holding this value).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [rule, captured]
+      - name: first_seen
+        description: Fetch time of the first file holding this value.
+        data_tests: [not_null]
+      - name: source_file
+        description: That file.
+        data_tests: [not_null]
+      - name: correction
+        description: True when this version replaced an earlier value.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [slot_start, measure, known_at]
+      - expression_is_true:
+          arguments:
+            expression: known_until is null or known_until > known_at
+      - expression_is_true:
+          arguments:
+            expression: basis = 'rule' or known_at = first_seen
+
+unit_tests:
+  # Times are UTC; JST is UTC+9. Capture start is the 08:45 JST daily capture of 2026-11-15
+  # (2026-11-14 23:45 UTC). Slot A, 12:00 JST on 2026-11-14, has rule time 13:30 JST (04:30 UTC).
+
+  - name: the_same_value_seen_again_or_reparsed_is_not_a_new_version
+    description: >
+      Two daily captures hold the same values, and both files were parsed again under a new
+      parser version. The first parse of the first file was wrong (500): DWD reads each file as
+      last parsed, so the wrong value never becomes a version, and every known_at stays the rule's.
+    model: dwd_tepco_actuals
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-14 23:45:00+00"}
+          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-15 23:45:00+00"}
+      - input: source('ods', 'tepco_actuals')
+        rows:
+          - {source_file: f1, date: "2026/11/14", time: "12:00", solar: 500, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-14 23:45:00+00", ingested_at: "2026-11-15 00:00:00+00", parser_version: "1"}
+          - {source_file: f1, date: "2026/11/14", time: "12:00", solar: 5000, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-14 23:45:00+00", ingested_at: "2026-11-17 00:00:00+00", parser_version: "2"}
+          - {source_file: f2, date: "2026/11/14", time: "12:00", solar: 5000, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-15 23:45:00+00", ingested_at: "2026-11-16 00:00:00+00", parser_version: "1"}
+          - {source_file: f2, date: "2026/11/14", time: "12:00", solar: 5000, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-15 23:45:00+00", ingested_at: "2026-11-17 00:00:00+00", parser_version: "2"}
+    expect:
+      rows:
+        - {slot_start: "2026-11-14 03:00:00+00", measure: solar, value_mw: 5000, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2026-11-14 03:00:00+00", measure: solar_curtailed, value_mw: 0, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2026-11-14 03:00:00+00", measure: wind, value_mw: 100, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
+
+  - name: a_correction_is_a_new_version_known_when_fetched
+    description: >
+      The second daily capture changes slot A's solar value. The correction is known when that file
+      was fetched, and it ends the first version there.
+    model: dwd_tepco_actuals
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-14 23:45:00+00"}
+          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-15 23:45:00+00"}
+      - input: source('ods', 'tepco_actuals')
+        rows:
+          - {source_file: f1, date: "2026/11/14", time: "12:00", solar: 5000, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-14 23:45:00+00", ingested_at: "2026-11-15 00:00:00+00", parser_version: "1"}
+          - {source_file: f2, date: "2026/11/14", time: "12:00", solar: 5100, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-15 23:45:00+00", ingested_at: "2026-11-16 00:00:00+00", parser_version: "1"}
+    expect:
+      rows:
+        - {slot_start: "2026-11-14 03:00:00+00", measure: solar, value_mw: 5000, known_at: "2026-11-14 04:30:00+00", known_until: "2026-11-15 23:45:00+00", basis: rule, correction: false}
+        - {slot_start: "2026-11-14 03:00:00+00", measure: solar, value_mw: 5100, known_at: "2026-11-15 23:45:00+00", known_until: null, basis: captured, correction: true}
+        - {slot_start: "2026-11-14 03:00:00+00", measure: solar_curtailed, value_mw: 0, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2026-11-14 03:00:00+00", measure: wind, value_mw: 100, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
+
+  - name: a_late_backfill_gets_its_fetch_time_after_capture_start
+    description: >
+      Notebook 04, section 2.2: slot B (12:30 JST on 2026-11-15) was first seen by the 14:02 JST
+      re-capture. Its rule time, 14:00 JST, falls after capture start, so it takes the fetch time,
+      never the earlier rule time. Slot C (2024-03-01) came in an initial load fetched after
+      capture start; its rule time falls before capture start, so it keeps the rule.
+    model: dwd_tepco_actuals
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-14 23:45:00+00"}
+          - {source: tepco_actuals, load_type: recapture, fetched_at: "2026-11-15 05:02:00+00"}
+          - {source: tepco_actuals, load_type: initial, fetched_at: "2026-11-15 01:00:00+00"}
+      - input: source('ods', 'tepco_actuals')
+        rows:
+          - {source_file: f2, date: "2026/11/15", time: "12:30", solar: 6000, solar_curtailed: 0, wind: 200, fetched_at: "2026-11-15 05:02:00+00", ingested_at: "2026-11-15 06:00:00+00", parser_version: "1"}
+          - {source_file: f3, date: "2024/03/01", time: "12:00", solar: 3000, solar_curtailed: 0, wind: 50, fetched_at: "2026-11-15 01:00:00+00", ingested_at: "2026-11-15 02:00:00+00", parser_version: "1"}
+    expect:
+      rows:
+        - {slot_start: "2026-11-15 03:30:00+00", measure: solar, value_mw: 6000, known_at: "2026-11-15 05:02:00+00", known_until: null, basis: captured, correction: false}
+        - {slot_start: "2026-11-15 03:30:00+00", measure: solar_curtailed, value_mw: 0, known_at: "2026-11-15 05:02:00+00", known_until: null, basis: captured, correction: false}
+        - {slot_start: "2026-11-15 03:30:00+00", measure: wind, value_mw: 200, known_at: "2026-11-15 05:02:00+00", known_until: null, basis: captured, correction: false}
+        - {slot_start: "2024-03-01 03:00:00+00", measure: solar, value_mw: 3000, known_at: "2024-03-01 04:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2024-03-01 03:00:00+00", measure: solar_curtailed, value_mw: 0, known_at: "2024-03-01 04:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2024-03-01 03:00:00+00", measure: wind, value_mw: 50, known_at: "2024-03-01 04:30:00+00", known_until: null, basis: rule, correction: false}
+
+  - name: capture_start_is_the_sources_own_first_daily_capture
+    description: >
+      JEPX's daily capture started earlier (2026-11-10), and an initial TEPCO load was fetched on
+      2026-11-13. Neither moves TEPCO's capture start: if either did, slot A (rule time 13:30 JST on
+      2026-11-14) would fall after it and take its fetch time instead of the rule.
+    model: dwd_tepco_actuals
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: jepx_spot, load_type: daily, fetched_at: "2026-11-10 02:00:00+00"}
+          - {source: tepco_actuals, load_type: initial, fetched_at: "2026-11-13 01:00:00+00"}
+          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-14 23:45:00+00"}
+      - input: source('ods', 'tepco_actuals')
+        rows:
+          - {source_file: f1, date: "2026/11/14", time: "12:00", solar: 5000, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-14 23:45:00+00", ingested_at: "2026-11-15 00:00:00+00", parser_version: "1"}
+    expect:
+      rows:
+        - {slot_start: "2026-11-14 03:00:00+00", measure: solar, value_mw: 5000, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2026-11-14 03:00:00+00", measure: solar_curtailed, value_mw: 0, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2026-11-14 03:00:00+00", measure: wind, value_mw: 100, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}

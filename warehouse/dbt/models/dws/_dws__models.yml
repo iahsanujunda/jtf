@@ -1,0 +1,56 @@
+version: 2
+
+models:
+  - name: dws_decision_slots
+    description: Every decision time T (09:00 JST on D−1) with the 48 slots of its target day.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [decision_time, slot_start]
+    columns:
+      - name: decision_time
+        data_tests: [not_null]
+      - name: slot_code
+        data_tests: [not_null]
+      - name: slot_start
+        data_tests: [not_null]
+
+  - name: dws_solar_features
+    description: >
+      Solar features per (decision_time, slot_start), as known at the decision time. One feature
+      table for backtests and the live forecast alike.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [decision_time, slot_start]
+    columns:
+      - name: solar_d2_mw
+        description: Solar output in the same slot on D−2, as known at T; null if nothing was.
+
+unit_tests:
+  # T is 09:00 JST on 2026-11-16 (00:00 UTC); its target day is 2026-11-17, D−2 is 2026-11-15.
+  - name: as_of_sees_only_what_was_known_at_t
+    description: >
+      Slot 12:00: a poisoned version became known one minute after T and stays invisible. Slot
+      12:30: a correction known exactly at T is visible (known_at <= T). Slot 13:00: only a version
+      known after T, so nothing. A wind value known before T is not solar.
+    model: dws_solar_features
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:00:00+00"}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:30:00+00"}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 04:00:00+00"}
+      - input: ref('dwd_tepco_actuals')
+        rows:
+          - {slot_start: "2026-11-15 03:00:00+00", measure: solar, value_mw: 5000, known_at: "2026-11-15 05:02:00+00", known_until: "2026-11-16 00:01:00+00"}
+          - {slot_start: "2026-11-15 03:00:00+00", measure: solar, value_mw: 99999, known_at: "2026-11-16 00:01:00+00", known_until: null}
+          - {slot_start: "2026-11-15 03:00:00+00", measure: wind, value_mw: 100, known_at: "2026-11-15 05:02:00+00", known_until: null}
+          - {slot_start: "2026-11-15 03:30:00+00", measure: solar, value_mw: 6000, known_at: "2026-11-15 05:32:00+00", known_until: "2026-11-16 00:00:00+00"}
+          - {slot_start: "2026-11-15 03:30:00+00", measure: solar, value_mw: 6500, known_at: "2026-11-16 00:00:00+00", known_until: null}
+          - {slot_start: "2026-11-15 04:00:00+00", measure: solar, value_mw: 7000, known_at: "2026-11-16 00:30:00+00", known_until: null}
+    expect:
+      rows:
+        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:00:00+00", solar_d2_mw: 5000}
+        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:30:00+00", solar_d2_mw: 6500}
+        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 04:00:00+00", solar_d2_mw: null}

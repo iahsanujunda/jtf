@@ -10,7 +10,7 @@ dbt-bigquery project, one dataset per layer. Dagster loads the models as assets 
 | [ADS](models/ads/) | Published forecasts, input snapshots, replay outputs | 1 (replays), 2 (daily) |
 | [monitoring](models/monitoring/) | Drift, accuracy, dashboard snapshots | 3 |
 
-Targets: `dev` (your own dataset prefix in the dev project), `ci` (a throwaway dataset per PR), `prod` (written only by CI).
+Targets: `dev` (datasets named `<prefix>_<layer>` in the dev project, the prefix from `JTF_DBT_DATASET_PREFIX`), `ci` (a throwaway prefix per PR), `prod` (written only by CI). Settings come from the environment, through [profiles.yml](profiles.yml); locally, `make dbt` reads them from `.env` and runs `dbt build`, and `make dbt ARGS="test --select dwd_tepco_actuals"` runs anything else.
 
 Rules: DWS reads inputs only through the as-of macro in [macros/](macros/); no `CURRENT_DATE()` or `NOW()` anywhere. CI enforces both with SQL rules in [rules/](rules/).
 
