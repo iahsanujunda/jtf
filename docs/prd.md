@@ -372,7 +372,7 @@ Two stages: the solar forecast feeds the price model through residual load, and 
 
 | Model | Target | Main inputs | Baselines | Output |
 | --- | --- | --- | --- | --- |
-| M1 Solar | Tokyo-area solar output, 48 slots of D | Forecast radiation, cloud and temperature at Kanto points; sun position and clear-sky output (pvlib); capacity estimate; calendar | Persistence (D−2 same slot, the last complete day); clear-sky × recent ratio. Benchmark, not a fair baseline: TEPCO's forecast, which is published after the gate and combines wind and solar | P10/P50/P90 per slot |
+| M1 Solar | Tokyo-area solar output, 48 slots of D | Forecast radiation, cloud and temperature at Kanto points; sun position and clear-sky output (SQL); capacity estimate; calendar | Persistence (D−2 same slot, the last complete day); clear-sky × recent ratio. Benchmark, not a fair baseline: TEPCO's forecast, which is published after the gate and combines wind and solar | P10/P50/P90 per slot |
 | M2 Price | Tokyo-area JEPX price, 48 slots of D | Forecast residual load (demand − M1 solar − wind); holiday-aware price lags (D−1, same weekday last week); 7- and 30-day rolling median and spread; calendar | Persistence (D−1 same slot); same weekday last week | P10/P50/P90 per slot |
 
 Both start as LightGBM with quantile objectives. Each forecast row records both stages' versions, so an M2 error can be traced to a bad M1 input.
