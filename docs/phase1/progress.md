@@ -111,6 +111,7 @@ Each is recorded where it applies; the list says where.
 | Night: the sun below 0° at both edges of a slot at all nine points. Every other slot is daylight, the metrics' filter | Phase-1 README, Decisions; `dwd_daylight.sql` |
 | Float sums in a fixed order (or rounded): BigQuery's float `SUM` isn't deterministic | Phase-1 README, time machine |
 | Weather DWD after the walking skeleton runs | Phase-1 README, Decisions |
+| Warehouse rules: `known_at` right per source and every input through `as_of` carry the rest. DWS never reads ODS (`dwd_source_captures` for the spine); DWD models with no `known_at` tagged `timeless`; labels outside DWS; a fingerprint test, not a SQL rule, for overwritten ODS rows | Phase-1 README, Point-in-time rules and Decisions; `warehouse/dbt/rules/README.md` |
 
 ## Known issues
 

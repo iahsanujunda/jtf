@@ -12,7 +12,7 @@ dbt-bigquery project, one dataset per layer. Dagster loads the models as assets 
 
 Targets: `dev` (datasets named `<prefix>_<layer>` in the dev project, the prefix from `JTF_DBT_DATASET_PREFIX`), `ci` (a throwaway prefix per PR), `prod` (written only by CI). Settings come from the environment, through [profiles.yml](profiles.yml); locally, `make dbt` reads them from `.env` and runs `dbt build`, and `make dbt ARGS="test --select dwd_tepco_actuals"` runs anything else.
 
-Rules: DWS reads inputs only through the as-of macro in [macros/](macros/); no `CURRENT_DATE()` or `NOW()` anywhere. CI enforces both with SQL rules in [rules/](rules/).
+Rules: DWS reads versioned DWD models only through the as-of macro in [macros/](macros/) and never reads ODS; models tagged `timeless` are read directly; no `CURRENT_DATE()` or `NOW()` anywhere. CI enforces them with the checks in [rules/](rules/).
 
 ## Tests
 
@@ -20,6 +20,6 @@ The warehouse owns every test of its SQL:
 
 - **dbt data tests** on models (uniqueness, not-null, accepted ranges, 48 slots per day) and singular tests in [tests/](tests/)
 - **dbt unit tests** (YAML `unit_tests:`) for the logic that must never be wrong: the `as_of` macro, unit conversions, slot normalisation
-- **SQL rules** in [rules/](rules/): sqlglot checks over compiled SQL
+- **Rules** in [rules/](rules/): manifest and sqlglot checks over compiled SQL, and a fingerprint test that ODS rows never change
 
 All run in a throwaway PR dataset in the dev project.

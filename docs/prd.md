@@ -98,7 +98,7 @@ This is the core of the project: every input carries when it became known, every
 1. **Decision time `T` is 09:00 JST on D−1**, one hour before the 10:00 JEPX gate closure. It is one setting, and every run and replay takes `T` explicitly; nothing reads the clock
 2. **`known_at` is when we could have had the value:** the fetch time of the first capture containing it; or, for a value's first version when the rule's time falls before the source's capture start, the source's publication rule for history (table below). It is never the parse time
 3. **A changed value is a new version** with its own `known_at`; the same value seen again in a later fetch is not
-4. **Features read inputs only through one as-of macro**: the latest version with `known_at ≤ T`. CI rejects `CURRENT_DATE()`, `NOW()` and any DWS model that reads ODS or DWD directly
+4. **Features read inputs only through one as-of macro**: the latest version with `known_at ≤ T`. CI rejects clock reads (`CURRENT_DATE()`, `CURRENT_TIMESTAMP()`, `NOW()`), any DWS model that depends on ODS, and any read of a versioned DWD model outside the macro. Reference data with no `known_at`, such as the sun's position, is tagged timeless and read directly
 5. **Targets use the latest values**; only inputs go through as-of. Evaluation also scores against the latest values
 6. **When nothing qualifies at `T`**, the fallback ladder takes the newest older input and flags the forecast
 
@@ -161,7 +161,7 @@ The replay runner is the time machine: it rebuilds any past day as it was known,
 | Raw (Cloud Storage) | Files exactly as fetched, by source and extraction date | Never modified; parse replays from here |
 | ODS | Parsed rows from raw files | Append-only; the source's own values and labels, with lineage (`source_file`, `fetched_at`, `load_type`, `source_time`, `parser_version`) on every row |
 | DWD | Cleaned, typed detail per area and slot, in MW and JST slot start; weather kept per run | Derives every version with its `known_at` and `basis` (rule or captured); a value seen again is not a new version; never collapse weather runs |
-| DWS | Features per decision time and slot, for every decision time | Inputs only through the as-of macro; no `CURRENT_DATE()` or hidden "latest" joins |
+| DWS | Features per decision time and slot, for every decision time | Versioned inputs only through the as-of macro, never from ODS; no clock reads or hidden "latest" joins; labels live in their own models |
 | ADS | Published forecasts and the exact input snapshot per run | Tagged with run ID, model versions and weather issue time; replays write to a separate dataset |
 
 The warehouse is BigQuery in both environments, with dbt-bigquery and one dataset per layer, so dev and prod run the same SQL dialect. At this data size (well under 1 GB) it stays inside BigQuery's free tier.
@@ -249,7 +249,7 @@ jepx-tokyo-forecast/
 | Component | Owns | Its tests prove | Runs |
 | --- | --- | --- | --- |
 | `jtf/` | All logic outside SQL: fetch, parse, storage, ML, Dagster definitions, CLI | Parsers on real source files, create-only storage, deterministic model code, Dagster definitions load | Offline, no credentials |
-| `warehouse/dbt/` | All SQL: DWD, DWS, ADS, monitoring, the `as_of` macro | dbt data tests; dbt unit tests for `as_of`, unit conversions and slot labels; SQL rules (no clock reads, inputs only through `as_of`, append-only ODS) | In a PR dataset in the dev project |
+| `warehouse/dbt/` | All SQL: DWD, DWS, ADS, monitoring, the `as_of` macro | dbt data tests; dbt unit tests for `as_of`, unit conversions and slot labels; rules (no clock reads, inputs only through `as_of`, no DWS read of ODS); a fingerprint test that no ODS row was changed after its load | In a PR dataset in the dev project |
 | `dashboard/` | The React app | Views render fixture snapshots correctly | Offline |
 | `deploy/` | Terraform and Dagster deployment config | `terraform validate` and `plan` per environment; compose config valid | Plan needs read access to GCP |
 | `e2e_tests/` | Nothing of its own | Determinism, future poison, reproduce, one day end to end | In a PR dataset, when `jtf/` or `warehouse/` changes |
@@ -406,7 +406,7 @@ One stack, with fault switches that are off in normal runs. Each scenario is a r
 | --- | --- | --- | --- | --- | --- |
 | F1 | Late weather forecast | Skip the latest weather run | Freshness check before the cutoff | Fall back to the previous run; flag degraded; widen ranges | Game day |
 | F2 | Lookahead leak | Feature uses actual weather (or `CURRENT_DATE`) instead of the forecast | sqlglot rule in CI; gap between leaky and as-of backtest | Block the merge; write up how much better the leak looked | CI + demo |
-| F3 | Overwritten history | `UPDATE` an ODS row in place | Append-only rule; determinism and replay test | Re-parse from the raw files in Cloud Storage | CI |
+| F3 | Overwritten history | `UPDATE` an ODS row in place | The per-file fingerprint test after every load; determinism and replay test | Re-parse from the raw files in Cloud Storage | CI |
 | F4 | Timezone bug | Load UTC timestamps as JST | Sanity check: solar output > 0 at night | Block the run; alert | CI |
 | F5 | Unit change | Read kWh per slot, or 万kW, as MW | Range assertion against capacity: a ceiling, and a floor on the week's peak, since 万kW read as MW is ten times too small and passes a ceiling | Block the run; alert | CI |
 | F6 | Missing slots | Drop some 30-min actuals | Completeness check per day | Flag and impute; exclude from training labels | CI |
