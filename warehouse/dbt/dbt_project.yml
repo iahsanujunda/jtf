@@ -1,0 +1,27 @@
+name: jtf
+version: "0.1.0"
+config-version: 2
+profile: jtf
+
+model-paths: [models]
+macro-paths: [macros]
+test-paths: [tests]
+target-path: target
+clean-targets: [target, dbt_packages]
+
+vars:
+  # Decision time T is 09:00 JST on D−1, one hour before JEPX's 10:00 gate closure.
+  decision_hour_jst: 9
+  # The first target day of training and backtests: MSM radiation is missing before it
+  # (notebook 02, section 8).
+  first_target_day: "2024-02-17"
+
+models:
+  jtf:
+    # ODS is not built by dbt: the jtf parsers load it, and dbt reads it as sources.
+    dwd:
+      +schema: dwd
+      +materialized: table
+    dws:
+      +schema: dws
+      +materialized: table

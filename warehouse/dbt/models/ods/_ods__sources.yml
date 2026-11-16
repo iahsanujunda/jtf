@@ -1,0 +1,17 @@
+version: 2
+
+# ODS is loaded by the jtf parsers (jtf/src/jtf/parse), append-only, one table per file layout.
+# Named ods/<table> as in Dagster, so lineage runs from each raw file to every model.
+sources:
+  - name: ods
+    database: "{{ env_var('JTF_BIGQUERY_PROJECT') }}"
+    schema: ods
+    tables:
+      - name: raw_files
+        description: >
+          The manifest: one row per raw file and ODS table, whatever happened to the file.
+          A source's capture start is its first `daily` fetch here.
+      - name: tepco_actuals
+        description: >
+          TEPCO's monthly area actuals, one row per slot per capture, in MW averaged over the
+          slot, labelled by the slot's start (`date` as 2026/11/1, `time` as 0:00).
