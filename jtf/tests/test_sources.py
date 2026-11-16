@@ -1,5 +1,7 @@
+import csv
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +11,7 @@ from jtf.ingest.sources import (
     PATIENT,
     SINGLE_RUNS,
     SOURCES,
+    WEATHER_POINTS,
     fiscal_year,
     fit_links,
     get_source,
@@ -177,3 +180,11 @@ def test_fit_history_adds_every_archived_copy_of_the_page():
     assert snapshots[1].url == (
         "https://web.archive.org/web/20240302210103id_/https://www.fit-portal.go.jp/PublicInfoSummary"
     )
+
+
+def test_the_warehouse_seed_holds_the_same_weather_points():
+    # dbt computes the sun at these points; the capture fetches weather at them. One definition.
+    seed = Path(__file__).parents[2] / "warehouse" / "dbt" / "seeds" / "weather_points.csv"
+    with seed.open() as f:
+        rows = [(r["point"], float(r["lat"]), float(r["lon"])) for r in csv.DictReader(f)]
+    assert rows == list(WEATHER_POINTS)

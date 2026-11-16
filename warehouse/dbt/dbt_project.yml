@@ -6,6 +6,7 @@ profile: jtf
 model-paths: [models]
 macro-paths: [macros]
 test-paths: [tests]
+seed-paths: [seeds]
 target-path: target
 clean-targets: [target, dbt_packages]
 
@@ -15,6 +16,14 @@ vars:
   # The first target day of training and backtests: MSM radiation is missing before it
   # (notebook 02, section 8).
   first_target_day: "2024-02-17"
+  # The sun is computed, not read, so its table covers a fixed range: from TEPCO's first yearly
+  # actuals to well past today. A data test fails once decision slots run past its end.
+  sun_first_day: "2016-04-01"
+  sun_last_day: "2030-12-31"
+
+seeds:
+  jtf:
+    +schema: dwd
 
 models:
   jtf:

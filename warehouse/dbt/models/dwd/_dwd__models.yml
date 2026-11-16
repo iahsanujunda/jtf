@@ -50,6 +50,56 @@ models:
       - expression_is_true:
           arguments:
             expression: basis = 'rule' or known_at = first_seen
+      - expression_is_true:
+          arguments:
+            expression: value_mw is null or value_mw >= 0
+
+  - name: dwd_sun_slots
+    description: >
+      The sun at each weather point per slot, from 2016-04 to 2030: its geometric height at the
+      slot's edges and Haurwitz clear-sky radiation, the mean of six samples. Computed from time
+      and place alone, so it has no known_at and needs no as_of.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [point, slot_start]
+      - expression_is_true:
+          arguments:
+            expression: clear_sky_ghi >= 0
+      # The sun below the horizon at both edges of a slot at a point: no clear sky there.
+      - expression_is_true:
+          arguments:
+            expression: elevation_start >= 0 or elevation_end >= 0 or clear_sky_ghi = 0
+    columns:
+      - name: point
+        data_tests: [not_null]
+      - name: slot_start
+        data_tests: [not_null]
+      - name: elevation_start
+        description: The sun's geometric height at the slot's start, degrees.
+        data_tests: [not_null]
+      - name: elevation_end
+        description: The same at the slot's end.
+        data_tests: [not_null]
+      - name: clear_sky_ghi
+        description: Haurwitz clear-sky radiation on the ground, W/m², the mean of six samples.
+        data_tests: [not_null]
+
+  - name: dwd_daylight
+    description: >
+      Night and daylight per slot for the whole area: night when the sun is below 0° at both
+      edges of the slot at all nine points. Daylight, every other slot, is the metrics' filter.
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: points = 9
+    columns:
+      - name: slot_start
+        data_tests: [unique, not_null]
+      - name: highest_edge
+        description: The highest the sun stands at either edge of the slot at any point, degrees.
+      - name: is_night
+        data_tests: [not_null]
 
 unit_tests:
   # Times are UTC; JST is UTC+9. Capture start is the 08:45 JST daily capture of 2026-11-15

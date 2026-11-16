@@ -1,0 +1,7 @@
+-- F4: solar is 0 at night, in every version. A slot is night when the sun is below the horizon at
+-- both its edges at all nine points (dwd_daylight); TEPCO showed output in none of those from
+-- February 2024 to November 2026 (notebooks/05_clear_sky.ipynb, section 2).
+select a.*, d.highest_edge
+from {{ ref('dwd_tepco_actuals') }} as a
+inner join {{ ref('dwd_daylight') }} as d on d.slot_start = a.slot_start
+where a.measure = 'solar' and d.is_night and a.value_mw > 0
