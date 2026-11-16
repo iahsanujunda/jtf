@@ -10,4 +10,4 @@ The one step that must run before CI can deploy anything. Run once per account f
 | CI service accounts: one for PRs (dev), one for releases (prod) | CI runs as these |
 | Monthly budget on your billing account | Cost alerts before anything billable exists |
 
-Inputs come from `terraform.tfvars` (gitignored), copied from `terraform.tfvars.example`; a `make init` wizard to write it comes in phase 5. When it finishes, it sets the GitHub repository variables CI needs if the `gh` CLI is logged in, or prints them.
+Inputs come from `terraform.tfvars` (gitignored), copied from `terraform.tfvars.example`; a `make init` wizard to write it comes in phase 4. When it finishes, it sets the GitHub repository variables CI needs if the `gh` CLI is logged in, or prints them.

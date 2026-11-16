@@ -52,7 +52,7 @@ Three free public sources (JEPX, TEPCO Power Grid and Open-Meteo) cover everythi
 | [Open-Meteo Single Runs API](https://open-meteo.com/en/docs/single-runs-api) | One whole model run, by its start time (UTC) | Hourly | Exact decision-time weather; measuring how pessimistic `previous_day2` is | Archive from 2026-04-02 only. Short MSM runs do not cover all of day D (the 21 UTC run ends at 21:00 JST on D) |
 | Open-Meteo forecast API, live | The latest run at decision time | Hourly | Daily predict | Run identity and availability time are recorded only by our own capture |
 | Holiday calendar (`jpholiday` Python package) | Japanese public holidays | Day | Holiday-aware lags, calendar features | Must be versioned like any other input |
-| [Imbalance prices](https://www.imbalanceprices-cs.jp/) (phase 3) | Settlement price per slot | 30 min; yen/kWh excl. tax | Business cost of forecast errors | Monthly CSVs. Corrections replace values, but pre-correction data stays on the update history page, so it is safe to load later |
+| [Imbalance prices](https://www.imbalanceprices-cs.jp/) (phase 2) | Settlement price per slot | 30 min; yen/kWh excl. tax | Business cost of forecast errors | Monthly CSVs. Corrections replace values, but pre-correction data stays on the update history page, so it is safe to load later |
 
 **Units and slot labels differ across sources**, even within TEPCO: MW averaged over the slot, kWh per slot (÷ 500 for MW) and 万kW (× 10 for MW); slots labelled by start time, by code 1–48, or as `0000`–`2400`. Parse keeps the source's values; DWD converts everything to MW and the slot's start time in JST, with range checks (F4, F5).
 
@@ -275,7 +275,7 @@ deploy/
 │       ├── dev/               terraform.tfvars.example
 │       └── prod/              terraform.tfvars.example
 └── scripts/
-    ├── init.py                optional wizard (phase 5): asks questions, writes the gitignored terraform.tfvars files
+    ├── init.py                optional wizard (phase 4): asks questions, writes the gitignored terraform.tfvars files
     └── promote.sh             point the capture job, fallback job and Dagster code location at an image digest
 ```
 
@@ -292,7 +292,7 @@ deploy/
 
 **Deploying your own copy**
 
-The repo is meant to be forked and deployed into someone else's GCP account. The habits that make this possible start on day one: every account-specific value is a variable, and bootstrap is how our own projects are set up. The wizard, the guide and the from-scratch proof come in phase 5, after the pipeline is complete. Terraform plays the role a Helm chart plays on Kubernetes: modules are the chart, `terraform.tfvars` is the values file, and a git tag is the chart version.
+The repo is meant to be forked and deployed into someone else's GCP account. The habits that make this possible start on day one: every account-specific value is a variable, and bootstrap is how our own projects are set up. The wizard, the guide and the from-scratch proof come in phase 4, after the pipeline is complete. Terraform plays the role a Helm chart plays on Kubernetes: modules are the chart, `terraform.tfvars` is the values file, and a git tag is the chart version.
 
 1. Fork and clone. Prerequisites: a GCP account with a billing account, gcloud, Terraform, uv
 2. `make init`: an optional wizard that asks for project IDs (or creates projects), billing account, region, GitHub repo (read from `git remote`) and alert email, and **writes the gitignored `terraform.tfvars` files**. Copying the `*.tfvars.example` files by hand gives the same result
@@ -477,15 +477,14 @@ Drift and accuracy are dbt models, so the replay runner can recompute monitoring
 
 ## Milestones
 
-The MVP comes first and stands on its own; everything else comes after, and each phase ends with a check that proves it works. This section only lists the phases. Each phase has its own plan under `docs/`, written when the phase starts: scope, data, work steps, decisions and risks. The plan is the working document; the PRD stays the overall design.
+The MVP comes first and stands on its own; everything else comes after, and each phase ends with a check that proves it works. One rule shapes the order: **no forecast runs in prod without its monitoring**, so the daily forecast and the monitoring that watches it ship together, as one phase. This section only lists the phases. Each phase has its own plan under `docs/`, written when the phase starts: scope, data, work steps, decisions and risks. The plan is the working document; the PRD stays the overall design.
 
 | Phase | Scope | Done when | Plan |
 | --- | --- | --- | --- |
 | 1. MVP | Capture job in prod; Dagster locally and in prod, showing every capture and the pipeline running; three sources into BigQuery; as-of layers and the time machine; solar model and baselines; F1 and F2 written up | MVP success criteria below | [docs/phase1](phase1/README.md) |
-| 2. Daily forecast in prod | Scheduled prediction with the fallback ladder and the fallback job; evaluation; hosted MLflow; exports and restore drill | 7 consecutive green days; restore drill passed; watchdog and fallback job tested | To be written |
-| 3. Monitoring | Drift and accuracy dbt models, React dashboard, model health card, release gate with shadow runs | A replayed fault scenario is flagged on the right day | To be written |
-| 4. Price model | M2 live next to M1 | M2 skill above 0 vs persistence | To be written |
-| 5. Full | Remaining fault scenarios, AI triage evaluated on them, optimism gap, fork guide and `make init`, blog post | Full success criteria below | To be written |
+| 2. Daily forecast in prod, monitored | Scheduled prediction with the fallback ladder and the fallback job; evaluation; drift and accuracy dbt models, the model health card and the React dashboard, live from the first prod run; a release gate with shadow runs; hosted MLflow; exports and restore drill | 7 consecutive green days with monitoring live throughout; a replayed fault scenario is flagged on the right day; restore drill passed; watchdog and fallback job tested | To be written |
+| 3. Price model | M2 live next to M1, monitored the same way | M2 skill above 0 vs persistence | To be written |
+| 4. Full | Remaining fault scenarios, AI triage evaluated on them, optimism gap, fork guide and `make init`, blog post | Full success criteria below | To be written |
 
 The MVP alone tells a complete story: a solar forecast built only from what was known at decision time, and a measured account of what a lookahead leak did to the backtest.
 
@@ -512,7 +511,7 @@ The MVP succeeds if the solar model beats persistence in an as-of backtest and t
 | Cloud SQL `db-f1-micro` is shared-core, with no SLA, 0.6 GB of RAM and 25 connections | Dagster pools capped; move to `db-g1-small` (about $26 a month) if it struggles; daily exports and a weekly restore drill (F13) |
 | Dagster definitions grow logic of their own | Assets stay thin wrappers over `jtf` functions, tested without Dagster |
 | Dagster and Cloud SQL sit on the deadline path | Outside watchdog; the fallback job needs neither; exports and a restore drill (F12, F13) |
-| A custom dashboard takes longer than a ready-made one | Built in phase 3, after the MVP; it reads snapshots, so there is no query backend to build |
+| A custom dashboard takes longer than a ready-made one | Built in phase 2, after the MVP; it reads snapshots, so there is no query backend to build |
 | Dev needs internet and the dev project | `jtf` and dashboard tests run offline; only warehouse and e2e tests need GCP |
 | Area totals hide plant-level effects | Stated as a non-goal; explain how plant-level would differ |
 

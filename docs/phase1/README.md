@@ -13,7 +13,7 @@ This is the working plan for phase 1 and is meant to be complete on its own. The
 5. M1 beats persistence (skill above 0) in the rolling backtest on daylight slots, with P10–P90 coverage reported; it is compared with TEPCO's forecast over whatever capture period exists, stated as such
 6. F2 (lookahead leak) and F1 (late weather) are written up in [docs/scenarios](../scenarios/)
 7. The root README explains the design, the results with their fidelity, and an honest status
-8. Nothing account-specific is hard-coded: project IDs, region, billing account and GitHub repo are Terraform variables, and both projects were set up through `make bootstrap`. The fork guide comes in phase 5
+8. Nothing account-specific is hard-coded: project IDs, region, billing account and GitHub repo are Terraform variables, and both projects were set up through `make bootstrap`. The fork guide comes in phase 4
 
 ## Scope
 
