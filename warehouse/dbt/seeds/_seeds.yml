@@ -1,0 +1,26 @@
+version: 2
+
+seeds:
+  - name: weather_points
+    description: >
+      The nine weather points, one per prefecture of the TEPCO area. The same points as
+      `WEATHER_POINTS` in jtf/src/jtf/ingest/sources.py, which the capture uses; a pytest fails if
+      the two ever differ.
+    config:
+      column_types: {point: string, lat: float64, lon: float64}
+    columns:
+      - name: point
+        data_tests: [unique, not_null]
+
+  - name: sun_reference
+    description: >
+      The sun as NREL's SPA (through pvlib) puts it, sampled as dwd_sun_slots samples it, on twelve
+      days of 2024–2026 at every point and slot. Written by scripts/write_sun_reference.py; the
+      test dwd_sun_slots__matches_spa compares the SQL against it.
+    config:
+      column_types:
+        point: string
+        slot_start: timestamp
+        elevation_start: float64
+        elevation_end: float64
+        clear_sky_ghi: float64

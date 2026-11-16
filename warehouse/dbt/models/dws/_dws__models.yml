@@ -13,7 +13,13 @@ models:
       - name: slot_code
         data_tests: [not_null]
       - name: slot_start
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          # The sun's table covers a fixed range: this fails once decision slots run past it.
+          - relationships:
+              arguments:
+                to: ref('dwd_daylight')
+                field: slot_start
 
   - name: dws_solar_features
     description: >
