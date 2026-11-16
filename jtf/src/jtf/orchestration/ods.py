@@ -13,9 +13,19 @@ from jtf.orchestration.raw import EXTRACTION_DAYS, raw_key
 from jtf.orchestration.resources import BigQuery, RawBucket
 from jtf.parse import PARSERS
 from jtf.parse.base import Parser
-from jtf.parse.load import parse_day
+from jtf.parse.load import MANIFEST, parse_day
 
 FILE_CHECKS = "files_pass_checks"
+
+# Every ODS asset writes the manifest, so no single asset owns it. Each parse that writes it reports
+# a materialization, so that models reading it (capture start, the decision-time spine) rebuild.
+MANIFEST_KEY = dg.AssetKey(["ods", MANIFEST])
+MANIFEST_SPEC = dg.AssetSpec(
+    MANIFEST_KEY,
+    group_name="ods",
+    kinds={"bigquery"},
+    description="The manifest: one row per raw file and ODS table, written by every ODS parse",
+)
 
 
 def ods_key(parser: Parser) -> dg.AssetKey:
@@ -54,6 +64,13 @@ def ods_asset(parser: Parser) -> dg.AssetsDefinition:
             now=datetime.now(UTC),
         )
         context.log.info(result.summary())
+        if result.recorded:
+            context.log_event(
+                dg.AssetMaterialization(
+                    asset_key=MANIFEST_KEY,
+                    metadata={"table": parser.table, "day": context.partition_key},
+                )
+            )
         if result.failed:
             # The files that parsed are loaded; the refused ones fail the partition by name.
             raise dg.Failure(

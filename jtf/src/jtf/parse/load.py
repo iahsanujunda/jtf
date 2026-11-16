@@ -66,6 +66,7 @@ class DayResult:
     gaps: list[str] = field(default_factory=list)
     flagged: dict[str, str] = field(default_factory=dict)
     failed: dict[str, str] = field(default_factory=dict)
+    recorded: int = 0  # rows written to the manifest: every file not skipped
 
     @property
     def ok(self) -> bool:
@@ -151,6 +152,7 @@ def parse_day(
     if entries:
         manifest = pd.DataFrame(entries).assign(**stamp)
         warehouse.append(MANIFEST, MANIFEST_COLUMNS, "source", conform(manifest, MANIFEST_COLUMNS))
+        result.recorded = len(entries)
     return result
 
 

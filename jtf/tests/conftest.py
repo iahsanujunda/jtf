@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -5,6 +6,15 @@ import pandas as pd
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures" / "raw"
+
+# Loading the Dagster definitions parses the dbt project when its manifest is missing (as in CI).
+# Parsing reads no data, but the profile names these settings, so they need some value.
+for name, value in {
+    "JTF_BIGQUERY_PROJECT": "test-project",
+    "JTF_BIGQUERY_LOCATION": "asia-northeast1",
+    "JTF_DBT_DATASET_PREFIX": "test",
+}.items():
+    os.environ.setdefault(name, value)
 
 
 class FakeWarehouse:

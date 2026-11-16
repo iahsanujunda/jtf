@@ -1,4 +1,6 @@
 -- Nothing can be known after the newest file we hold of it.
+{{ config(meta={'dagster': {'ref': {'name': 'dwd_tepco_actuals'}}}) }}
+
 with newest as (
     select max(fetched_at) as t
     from {{ source('ods', 'raw_files') }}
