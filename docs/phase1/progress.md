@@ -1,6 +1,6 @@
 # Phase 1 progress
 
-**Updated 2026-11-16, 10:05 JST.** Where the work stands, what comes next, and what is waiting on whom. Start here when picking the work back up; update it at the end of every working session. The plan itself is in [README.md](README.md).
+**Updated 2026-11-16, 12:10 JST.** Where the work stands, what comes next, and what is waiting on whom. Start here when picking the work back up; update it at the end of every working session. The plan itself is in [README.md](README.md).
 
 ## Where things stand
 
@@ -9,7 +9,7 @@
 | 1. Capture | **Done.** 12 Cloud Run jobs in prod: one per scheduled source (10, `meti_fit_capacity` added on 2026-11-16) and the 2 monthly re-captures, each pinging its own healthchecks.io check. The two history-only Open-Meteo sources run as one-off executions of the `openmeteo_live` job |
 | 2. Initial history load | **Done except Single Runs.** TEPCO actuals, JEPX, Previous Runs and the demand outlook's archive are loaded. Single Runs: 819 of about 1,370 runs; the rest is waiting on Open-Meteo's daily quota |
 | 3. Dagster, locally | **Done.** Raw assets with the bucket sensor, freshness policies, extraction-day partitions, `ods/tepco_actuals` with automation. On 2026-11-16 the automation daemon parsed the 08:45 capture on its own at 08:47 (2 files, 2,225 rows) |
-| 5. Parse (first half) | **Done early, plus capacity.** 17 parsers in `jtf/src/jtf/parse/`, each proven on every raw file; all 18 ODS tables loaded in dev BigQuery, the capacity source's three included. Only `tepco_actuals` is orchestrated so far |
+| 5. Parse (first half) | **Done early, plus capacity.** 17 parsers in `jtf/src/jtf/parse/`, each proven on every raw file; all 18 ODS tables loaded in dev BigQuery, the capacity source's three included. All 17 are Dagster assets in code since 2026-11-16; the 16 new ones have not run in Dagster yet |
 | 4, 5 (dbt), 6–9 | Not started |
 
 ## Next, in order
@@ -19,8 +19,8 @@
    gcloud run jobs execute jtf-fetch-openmeteo-live --region=asia-northeast1 --project=jepx-tokyo-forecast-prod --task-timeout=1800s --wait --args="fetch,--source,openmeteo_previous_runs,--initial"
    gcloud run jobs execute jtf-fetch-openmeteo-live --region=asia-northeast1 --project=jepx-tokyo-forecast-prod --task-timeout=3600s --wait --args="fetch,--source,openmeteo_single_runs,--initial,--max-calls,8000"
    ```
-   Both write to extraction day 2026-11-16. Parse them with `jtf parse --source openmeteo_previous_runs --from 2026-11-16` and the same for `openmeteo_single_runs`, then re-run notebook 04, whose seam table should show weather for every target day
-2. **Strap the other 16 parsers into Dagster:** add their tables to `ORCHESTRATED` in [orchestration/ods.py](../../jtf/src/jtf/orchestration/ods.py). New captures of every source are then parsed on their own. Days already loaded with `jtf parse` are skipped by the manifest
+   Both write to extraction day 2026-11-16. If Dagster is running with the new ODS assets (item 2), it parses them on its own; otherwise parse them with `jtf parse --source openmeteo_previous_runs --from 2026-11-16` and the same for `openmeteo_single_runs`. Then re-run notebook 04, whose seam table should show weather for every target day
+2. **Run the 16 new ODS assets once in `dagster dev`:** all 17 tables are listed in `ORCHESTRATED` in [orchestration/ods.py](../../jtf/src/jtf/orchestration/ods.py). Days 2026-11-15 and 2026-11-16 were recorded before these assets existed, so materialize both partitions of every ODS asset by hand; files already loaded with `jtf parse` are skipped by the manifest. From then on, new captures of every source are parsed on their own
 3. **Step 5, warehouse and walking skeleton** ([order of work](README.md#order-of-work)): the dbt project; DWD for the solar path as notebook 04 designed it, and capacity as notebook 03 did; the `as_of` macro with the `known_at` unit tests (the late-backfill case from notebook 04 among them); a minimal DWS (D−2 output, clear-sky output, the capacity estimate); the persistence baseline in a rolling backtest, metrics in local MLflow; all as Dagster assets in `dagster dev`. Done when the lineage runs from raw files to the baseline's metrics
 4. **Step 6, the time machine, on the skeleton:** replay, and the determinism, future-poison and backfill-stability tests
 5. **Step 7, features and model:** notebook 05 on top of DWS through `as_of` (the label on curtailed slots, clear-sky index, capacity-weighted weather, the quality checks behind F4 and F6); each feature that earns its place becomes a DWS model; the clear-sky × ratio baseline and the TEPCO benchmark; M1 quantile models; skill above persistence on daylight slots
@@ -30,7 +30,6 @@
 
 ## Waiting on you
 
-- **Read notebook 04's "What this exploration made known"** and push back on any "So"; the plan is then updated to match (the DWD models of step 5 follow it)
 - **healthchecks.io:** set the cron and grace time of each check once it exists (`jtf-meti-fit-capacity` appears with its first daily ping, on 2026-11-17 at 08:45; 15 minutes' grace): the 9 daily ones (15 minutes' grace for 08:45 sources, 30 for the others), `jtf-tepco-actuals-recapture` (`30 9 1 * *`) and, after its first ping on 1 December, `jtf-tepco-demand-outlook-recapture` (`40 9 1 * *`); delete the old `jtf-morning`, `jtf-jepx` and `jtf-evening`. Skip what is already done
 
 ## What runs where
@@ -41,7 +40,7 @@
 | Capture image | `asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:78265ffb106e…` | Built from commit `e887411` and applied by hand on 2026-11-16 ([How to](#how-to)) |
 | Capture schedules (JST) | 08:45: `tepco_actuals`, the three same-day `AREA_*` files, `tepco_demand_outlook`, `openmeteo_live`, `meti_fit_capacity`. 11:00: `jepx_spot`. 19:00 and 22:00: the two next-day files. 09:30 and 09:40 on the 1st: the re-captures | All enabled |
 | Raw bucket | `gs://jepx-tokyo-forecast-prod-raw` | 1,005 files (156 MiB) on 2026-11-15, 981 under registered sources; the other 24 are test captures under legacy prefixes, never parsed. Guarded by `prevent_destroy`, 90 days of soft delete and a lien on the project |
-| Dagster | `make dagster` on the laptop: UI on http://localhost:3000, state in `.dagster/`, settings in `.env` | Sensors `raw_bucket_sensor` (every 5 minutes) and `automation` running; 11 raw assets, 1 ODS asset |
+| Dagster | `make dagster` on the laptop: UI on http://localhost:3000, state in `.dagster/`, settings in `.env` | Sensors `raw_bucket_sensor` (every 5 minutes) and `automation` running; 11 raw assets, 17 ODS assets (16 of them added on 2026-11-16, not run yet) |
 | Dev BigQuery | `jepx-tokyo-forecast-dev.ods` | 15 tables: `openmeteo_previous_runs` 2.0 M rows, `openmeteo_single_runs` 0.9 M, `tepco_demand_outlook_5min` 487 k, `jepx_spot` 208 k, `tepco_actuals_yearly` 69 k, `tepco_actuals` 53 k (materialized from the Dagster UI), the rest smaller; `raw_files` is the manifest |
 | Prod BigQuery | – | Nothing yet: arrives with step 4 |
 
@@ -134,3 +133,4 @@ Local settings live in gitignored files: `.env` (`JTF_RAW_URL` is the prod raw b
 | 2026-11-16 09:50 | The capacity source released: image `e887411` on all 12 jobs, the new job and its 08:45 schedule, its initial load (120 files) and parse (18 ODS tables in dev) |
 | 2026-11-16 morning | Notebook 03 agreed; the PRD and phase-1 plan updated to match, and the backfill tests written into steps 5 and 6. The capacity source built: capture with an index page, three parsers, tests (89 passing); a real capture into a scratch store took 120 files and the daily one skipped all 66 releases |
 | 2026-11-16 morning | Notebook 03, solar capacity: METI's FIT/FIP disclosure verified as the source; the figure is 4.0–8.6 months old when used; the page's own publication dates were revised after the fact |
+| 2026-11-16 midday | Notebook 04's conclusions agreed. All 17 parsers listed as Dagster ODS assets, with a test that every file of a day is parsed by some asset (90 passing) |

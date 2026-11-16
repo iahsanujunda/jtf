@@ -81,5 +81,23 @@ def ods_asset(parser: Parser) -> dg.AssetsDefinition:
 
 
 # A parser is proven with `jtf parse` first; it becomes an asset once its table is listed here.
-ORCHESTRATED = ("tepco_actuals",)
+ORCHESTRATED = (
+    "tepco_actuals",
+    "tepco_actuals_yearly",
+    "tepco_area_forecast_next_day",
+    "tepco_area_bg_plan_next_day",
+    "tepco_area_forecast",
+    "tepco_area_bg_plan",
+    "tepco_area_actuals_today",
+    "tepco_demand_outlook_peaks",
+    "tepco_demand_outlook_hourly",
+    "tepco_demand_outlook_5min",
+    "jepx_spot",
+    "openmeteo_previous_runs",
+    "openmeteo_single_runs",
+    "openmeteo_live",
+    "meti_fit_capacity_pref",
+    "meti_fit_capacity_city",
+    "meti_fit_notices",
+)
 ODS_ASSETS = [ods_asset(PARSERS[table]) for table in ORCHESTRATED]

@@ -17,7 +17,7 @@ Raw files to ODS rows, one parser per file layout. The design, and a run over ev
 | `load.py` | `parse_day`: one source's files for one extraction day, once per parser version; the `raw_files` manifest |
 | `bigquery.py` | The ODS dataset: append-only loads, and the queries that say what is already loaded |
 
-Every layout has its parser: 14 tables plus the manifest, registered in `PARSERS` by table. A parser declares which files under its source's prefix it `reads`, so a source with several layouts has one parser, and one table, per layout. A parser is proven with `jtf parse` first and becomes a Dagster asset only once its table is listed in `ORCHESTRATED` ([orchestration/ods.py](../orchestration/ods.py)).
+Every layout has its parser: 17 tables plus the manifest, registered in `PARSERS` by table. A parser declares which files under its source's prefix it `reads`, so a source with several layouts has one parser, and one table, per layout. A parser is proven with `jtf parse` first and becomes a Dagster asset only once its table is listed in `ORCHESTRATED` ([orchestration/ods.py](../orchestration/ods.py)).
 
 **Types:** a column is `INTEGER` where every file so far holds whole numbers (all TEPCO values, JEPX volumes), and the parser refuses a decimal there as a likely unit or layout change; JEPX prices and Open-Meteo values are `FLOAT`; labels and dates stay `STRING` as published.
 
