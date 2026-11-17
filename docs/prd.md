@@ -163,7 +163,7 @@ The replay runner is the time machine: it rebuilds any past day as it was known,
 | DIM | What nothing is learned about over time: the sun per point and slot, daylight, the weather points | No `known_at`; reads only itself, and every layer reads it directly |
 | DWD | Cleaned, typed detail per area and slot, in MW and JST slot start; weather kept per run | Derives every version with its `known_at` and `basis` (rule or captured); a value seen again is not a new version; never collapse weather runs |
 | DWS | Features per decision time and slot, for every decision time, and the inputs all slots of a decision time share, such as the capacity estimate | Versioned inputs only through the as-of macro, never from ODS; no clock reads or hidden "latest" joins; labels live in their own models |
-| ADS | Published forecasts and the exact input snapshot per run | Tagged with run ID, model versions and weather issue time; replays write to a separate dataset |
+| ADS | Outputs: labels (`ads_label_*`), what a model said (`ads_prediction_*`), each prediction met by its label (`ads_outcome_*`), and the exact input snapshot per published run (`ads_feature_*`) | Labels take the latest values, never through as-of; tagged with run ID, model versions and weather issue time; models read features from DWS, never from a snapshot; replays write to a separate dataset |
 
 The warehouse is BigQuery in both environments, with dbt-bigquery and one dataset per layer, so dev and prod run the same SQL dialect. At this data size (well under 1 GB) it stays inside BigQuery's free tier.
 

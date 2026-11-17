@@ -38,3 +38,6 @@ models:
     dws:
       +schema: dws
       +materialized: table
+    ads:
+      +schema: ads
+      +materialized: table
