@@ -98,7 +98,7 @@ This is the core of the project: every input carries when it became known, every
 1. **Decision time `T` is 09:00 JST on D−1**, one hour before the 10:00 JEPX gate closure. It is one setting, and every run and replay takes `T` explicitly; nothing reads the clock
 2. **`known_at` is when we could have had the value:** the fetch time of the first capture containing it; or, for a value's first version when the rule's time falls before the source's capture start, the source's publication rule for history (table below). It is never the parse time
 3. **A changed value is a new version** with its own `known_at`; the same value seen again in a later fetch is not
-4. **Features read inputs only through one as-of macro**: the latest version with `known_at ≤ T`. CI rejects clock reads (`CURRENT_DATE()`, `CURRENT_TIMESTAMP()`, `NOW()`), any read of a layer above (only DWD reads ODS), and any read of a versioned DWD model outside the macro. Reference data with no `known_at`, such as the sun's position, is its own layer, DIM, read directly
+4. **Features read inputs only through one as-of macro**: the latest version with `known_at ≤ T`. CI rejects clock reads (`CURRENT_DATE()`, `CURRENT_TIMESTAMP()`, `NOW()`), any read of a layer above (only DWD reads ODS), and any read of a versioned DWD model outside the macro, with one named exception: the decision-time spine reads how far the captures reach, which decides which decision times exist and feeds no value. Reference data with no `known_at`, such as the sun's position, is its own layer, DIM, read directly
 5. **Targets use the latest values**; only inputs go through as-of. Evaluation also scores against the latest values
 6. **When nothing qualifies at `T`**, the fallback ladder takes the newest older input and flags the forecast
 
@@ -250,7 +250,7 @@ jepx-tokyo-forecast/
 | Component | Owns | Its tests prove | Runs |
 | --- | --- | --- | --- |
 | `jtf/` | All logic outside SQL: fetch, parse, storage, ML, Dagster definitions, CLI | Parsers on real source files, create-only storage, deterministic model code, Dagster definitions load | Offline, no credentials |
-| `warehouse/dbt/` | All SQL: DWD, DWS, ADS, monitoring, the `as_of` macro | dbt data tests; dbt unit tests for `as_of`, unit conversions and slot labels; rules (no clock reads, inputs only through `as_of`, no DWS read of ODS); a fingerprint test that no ODS row was changed after its load | In a PR dataset in the dev project |
+| `warehouse/dbt/` | All SQL: DWD, DWS, ADS, monitoring, the `as_of` macro | dbt data tests; dbt unit tests for `as_of`, unit conversions and slot labels; rules (no clock reads, inputs only through `as_of`, no DWS read of ODS); a fingerprint test that no ODS row was changed after its load | In CI, hermetic: unit tests, an empty build and the rules in a PR dataset that reads no real data. On real data: the data tests after every build, as pipeline checks, and the fingerprint after every load |
 | `dashboard/` | The React app | Views render fixture snapshots correctly | Offline |
 | `deploy/` | Terraform and Dagster deployment config | `terraform validate` and `plan` per environment; compose config valid | Plan needs read access to GCP |
 | `e2e_tests/` | Nothing of its own | Determinism, future poison, reproduce, one day end to end | In a PR dataset, when `jtf/` or `warehouse/` changes |

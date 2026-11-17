@@ -23,4 +23,4 @@ The warehouse owns every test of its SQL:
 - **dbt unit tests** (YAML `unit_tests:`) for the logic that must never be wrong: the `as_of` macro, unit conversions, slot normalisation
 - **Rules** in [rules/](rules/): manifest and sqlglot checks over compiled SQL, and a fingerprint test that ODS rows never change
 
-All run in a throwaway PR dataset in the dev project.
+In CI the unit tests, an empty build and the rules run in a throwaway PR dataset that reads no real data. The data tests run on real data after every build, as Dagster checks; the fingerprint after every load, once built (before step 6).
