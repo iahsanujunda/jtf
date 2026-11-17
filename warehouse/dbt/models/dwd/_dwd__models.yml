@@ -101,6 +101,67 @@ models:
       - name: is_night
         data_tests: [not_null]
 
+  - name: dwd_capacity_releases
+    description: >
+      METI's quarterly FIT/FIP capacity releases and when each became known: one row per release
+      held in both its tables. Read for a decision time only through `as_of`. The figures
+      themselves are another model; a file fetched again is a new version of those, never a new
+      date here (notebook 04, section 6).
+    columns:
+      - name: ref_date
+        description: The quarter's last day, the date the release's figures describe.
+        data_tests: [unique, not_null]
+      - name: known_at
+        description: When we could have had both its files. Never the parse time.
+        data_tests: [not_null]
+      - name: known_until
+        description: Always null; a release is one fact, so nothing ends it. Kept for `as_of`.
+      - name: basis
+        description: >
+          `rule` (the history rule, for a date before capture start) or `captured` (the fetch of
+          the capture that first held both files).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [rule, captured]
+      - name: rule
+        description: >
+          Which part of the rule set the date: `announced` (the end of the announcement date),
+          `last_modified` (a file went up after it) or `margin` (never announced: the end of the
+          files' day + 16 days). Null when captured.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [announced, last_modified, margin]
+      - name: announced
+        description: >
+          The latest announcement date any copy of the page taken before capture start showed;
+          null if none did.
+      - name: a_last_modified
+        description: "`Last-Modified` of table A's first copy."
+        data_tests: [not_null]
+      - name: b_last_modified
+        description: "`Last-Modified` of table B's first copy."
+        data_tests: [not_null]
+      - name: first_held
+        description: The fetch time at which we first held both tables.
+        data_tests: [not_null]
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: (basis = 'rule') = (rule is not null)
+      - expression_is_true:
+          arguments:
+            expression: basis = 'rule' or known_at = first_held
+      # Never known before its files went up.
+      - expression_is_true:
+          arguments:
+            expression: known_at >= greatest(a_last_modified, b_last_modified)
+      - expression_is_true:
+          arguments:
+            expression: ref_date = last_day(ref_date) and extract(month from ref_date) in (3, 6, 9, 12)
+
 unit_tests:
   # Times are UTC; JST is UTC+9. Capture start is the 08:45 JST daily capture of 2026-11-15
   # (2026-11-14 23:45 UTC). Slot A, 12:00 JST on 2026-11-14, has rule time 13:30 JST (04:30 UTC).
@@ -195,3 +256,130 @@ unit_tests:
         - {slot_start: "2026-11-14 03:00:00+00", measure: solar, value_mw: 5000, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
         - {slot_start: "2026-11-14 03:00:00+00", measure: solar_curtailed, value_mw: 0, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
         - {slot_start: "2026-11-14 03:00:00+00", measure: wind, value_mw: 100, known_at: "2026-11-14 04:30:00+00", known_until: null, basis: rule, correction: false}
+
+  # dwd_capacity_releases. Times are UTC; JST is UTC+9. Capture start is the 08:45 JST daily
+  # capture of 2026-11-17 (2026-11-16 23:45 UTC), as in the data. The end of an announcement date
+  # in JST is 15:00 UTC on that date.
+
+  - name: the_rule_takes_the_announcement_never_before_the_files
+    description: >
+      End of March 2026 was announced on 2026-08-20, after its files went up on 2026-08-18: known
+      at the end of the 20th. End of June 2020 was announced on 2020-11-10, but its table B was
+      re-uploaded on 2021-10-05 and only that copy is held: known then (notebook 04, section 6.2).
+    model: dwd_capacity_releases
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Tue, 18 Aug 2026 04:42:27 +0000"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Tue, 18 Aug 2026 04:45:00 +0000"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202006.xlsx, status: parsed, fetched_at: "2026-11-16 00:44:00+00", last_modified: "Tue, 10 Nov 2020 01:00:00 +0000"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202006.xlsx, status: parsed, fetched_at: "2026-11-16 00:45:00+00", last_modified: "Tue, 05 Oct 2021 06:00:00 +0000"}
+      - input: source('ods', 'meti_fit_notices')
+        rows:
+          - {source_file: w1, ref_date: "2020-06-30", announced: "2020-11-10", source_time: "2020-12-01 00:00:00+00", fetched_at: "2026-11-16 00:10:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: w2, ref_date: "2026-03-31", announced: "2026-08-20", source_time: "2026-09-01 00:00:00+00", fetched_at: "2026-11-16 00:11:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+    expect:
+      rows:
+        - {ref_date: "2020-06-30", known_at: "2021-10-05 06:00:00+00", basis: rule, rule: last_modified, announced: "2020-11-10"}
+        - {ref_date: "2026-03-31", known_at: "2026-08-20 15:00:00+00", basis: rule, rule: announced, announced: "2026-08-20"}
+
+  - name: a_release_never_announced_is_known_16_days_after_its_files
+    description: >
+      End of June 2017 is linked from the page but no copy ever announced it; its files went up on
+      2024-02-06 JST, so it is known at the end of 2024-02-22 JST, inside the training window
+      (notebook 04, sections 6.2 and 6.5). An announcement whose files are not held lists nothing.
+    model: dwd_capacity_releases
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref201706.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Tue, 06 Feb 2024 03:00:00 +0000"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city201706.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Tue, 06 Feb 2024 03:10:00 +0000"}
+      - input: source('ods', 'meti_fit_notices')
+        rows:
+          - {source_file: w1, ref_date: "2018-03-31", announced: "2018-08-01", source_time: "2018-09-01 00:00:00+00", fetched_at: "2026-11-16 00:10:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+    expect:
+      rows:
+        - {ref_date: "2017-06-30", known_at: "2024-02-22 15:00:00+00", basis: rule, rule: margin, announced: null}
+
+  - name: a_copy_taken_after_capture_start_never_moves_a_rule_dated_release
+    description: >
+      End of March 2023 was announced on 2023-08-01 by an archived copy, which a later history run
+      fetched after capture start: it still counts, being taken before it. Our own daily copy after
+      capture start shows 2023-08-02; it doesn't count, so the date stays fixed (notebook 04,
+      section 6.3).
+    model: dwd_capacity_releases
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202303.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Mon, 31 Jul 2023 02:00:00 +0000"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202303.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Mon, 31 Jul 2023 02:10:00 +0000"}
+      - input: source('ods', 'meti_fit_notices')
+        rows:
+          - {source_file: w1, ref_date: "2023-03-31", announced: "2023-08-01", source_time: "2023-09-01 00:00:00+00", fetched_at: "2026-11-17 01:00:00+00", ingested_at: "2026-11-17 02:00:00+00"}
+          - {source_file: d1, ref_date: "2023-03-31", announced: "2023-08-02", source_time: null, fetched_at: "2026-11-17 23:45:00+00", ingested_at: "2026-11-18 00:00:00+00"}
+    expect:
+      rows:
+        - {ref_date: "2023-03-31", known_at: "2023-08-01 15:00:00+00", basis: rule, rule: announced, announced: "2023-08-01"}
+
+  - name: a_release_first_held_after_capture_start_is_known_when_both_files_are
+    description: >
+      End of June 2026 comes out after capture start: table A is fetched on 2026-12-11 JST, table B
+      a day later. It is known at the second fetch, `captured`, whatever the page announced.
+      End of September 2026 has only table A so far, so it isn't listed.
+    model: dwd_capacity_releases
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_capacity_pref, filename: A_pref202606.xlsx, status: parsed, fetched_at: "2026-12-10 23:45:30+00", last_modified: "Wed, 09 Dec 2026 05:00:00 +0000"}
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_capacity_city, filename: B_city202606.xlsx, status: parsed, fetched_at: "2026-12-11 23:45:30+00", last_modified: "Fri, 11 Dec 2026 01:00:00 +0000"}
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_capacity_pref, filename: A_pref202609.xlsx, status: parsed, fetched_at: "2027-02-10 23:45:30+00", last_modified: "Wed, 10 Feb 2027 01:00:00 +0000"}
+      - input: source('ods', 'meti_fit_notices')
+        rows:
+          - {source_file: d1, ref_date: "2026-06-30", announced: "2026-12-10", source_time: null, fetched_at: "2026-12-10 23:45:00+00", ingested_at: "2026-12-11 00:00:00+00"}
+    expect:
+      rows:
+        - {ref_date: "2026-06-30", known_at: "2026-12-11 23:45:30+00", basis: captured, rule: null, announced: null, first_held: "2026-12-11 23:45:30+00"}
+
+  - name: a_refetched_file_does_not_move_its_release
+    description: >
+      Table A of end of March 2026 is fetched again on 2026-12-02 JST after a re-upload on
+      2026-11-30, and its first copy parsed again under a new parser version. The release keeps the
+      first copy's Last-Modified and its date; the re-upload is a new version of its figures only.
+    model: dwd_capacity_releases
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Tue, 18 Aug 2026 04:42:27 +0000", parser_version: "1"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Tue, 18 Aug 2026 04:42:27 +0000", parser_version: "2"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Tue, 18 Aug 2026 04:45:00 +0000"}
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_capacity_pref, filename: A_pref202603.xlsx, status: parsed, fetched_at: "2026-12-01 23:45:30+00", last_modified: "Mon, 30 Nov 2026 02:00:00 +0000"}
+      - input: source('ods', 'meti_fit_notices')
+        rows:
+          - {source_file: w2, ref_date: "2026-03-31", announced: "2026-08-20", source_time: "2026-09-01 00:00:00+00", fetched_at: "2026-11-16 00:11:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+    expect:
+      rows:
+        - {ref_date: "2026-03-31", known_at: "2026-08-20 15:00:00+00", basis: rule, rule: announced, a_last_modified: "2026-08-18 04:42:27+00", first_held: "2026-11-16 00:43:00+00"}
+
+  - name: a_page_copy_is_read_as_last_parsed
+    description: >
+      An archived copy was first parsed wrongly as announcing end of March 2026 on 2026-08-25, then
+      parsed again correctly as 2026-08-20. Only the last parse counts.
+    model: dwd_capacity_releases
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Tue, 18 Aug 2026 04:42:27 +0000"}
+          - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Tue, 18 Aug 2026 04:45:00 +0000"}
+      - input: source('ods', 'meti_fit_notices')
+        rows:
+          - {source_file: w2, ref_date: "2026-03-31", announced: "2026-08-25", source_time: "2026-09-01 00:00:00+00", fetched_at: "2026-11-16 00:11:00+00", ingested_at: "2026-11-16 01:00:00+00", parser_version: "1"}
+          - {source_file: w2, ref_date: "2026-03-31", announced: "2026-08-20", source_time: "2026-09-01 00:00:00+00", fetched_at: "2026-11-16 00:11:00+00", ingested_at: "2026-11-18 01:00:00+00", parser_version: "2"}
+    expect:
+      rows:
+        - {ref_date: "2026-03-31", known_at: "2026-08-20 15:00:00+00", basis: rule, rule: announced, announced: "2026-08-20"}
