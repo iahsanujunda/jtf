@@ -81,6 +81,23 @@ def test_every_model_and_seed_is_in_a_layer_and_named_for_it(manifest):
     assert not wrong, f"in no layer, or not named for its own: {wrong}"
 
 
+def test_every_dwd_model_another_layer_may_read_holds_versions(manifest):
+    # DWD is facts with the time each became known: as_of reads known_at and known_until. A model
+    # without them belongs in DIM (nothing learned over time) or is private to the group that
+    # versions it (dwd_capacity_area_files). Read from the documented columns.
+    unversioned = {
+        node["name"]
+        for node in built(manifest).values()
+        if node["resource_type"] == "model"
+        and node["config"]["schema"] == "dwd"
+        and node["access"] != "private"
+        and not {"known_at", "known_until"} <= set(node["columns"])
+    }
+    assert not unversioned, (
+        f"DWD models others may read without known_at and known_until: {unversioned}"
+    )
+
+
 def test_every_model_reads_only_what_its_layer_may_read(manifest):
     upward = {
         (uid, dep)

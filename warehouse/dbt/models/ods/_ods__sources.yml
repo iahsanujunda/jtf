@@ -30,3 +30,16 @@ sources:
         description: >
           Table B of each release, by municipality (`area` as 静岡県沼津市), laid out as table A.
           About 2 GB: read only through dwd_capacity_area_files, incrementally.
+      - name: openmeteo_previous_runs
+        description: >
+          Open-Meteo Previous Runs, history only: per point, model, lead (0 to 2 days) and hour
+          (UTC), the six variables. Parts of the history were fetched twice (notebook 04,
+          section 3.4).
+      - name: openmeteo_single_runs
+        description: >
+          Open-Meteo Single Runs, history only: per point, model, run (its start, UTC) and hour.
+      - name: openmeteo_live
+        description: >
+          The live forecast captured daily at 08:45 JST: per point, model and hour; which run it
+          holds is not given.
+

@@ -1,0 +1,4 @@
+model,delay_hours,delay_basis,has_radiation
+jma_msm,3,assumed,true
+jma_gsm,6,assumed,false
+ecmwf_ifs025,6,assumed,true

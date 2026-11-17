@@ -51,3 +51,27 @@ seeds:
               arguments:
                 to: ref('dim_weather_points')
                 field: point
+
+  - name: dim_weather_models
+    description: >
+      The three weather models Open-Meteo serves us, with what the time rules need: how long after
+      a run starts its forecast can be fetched (MSM 3 hours, GSM and ECMWF 6), assumed until the
+      live captures measure it, and whether the model has radiation at all (GSM has none through
+      Open-Meteo, plan, Decisions, "Weather models"). A measured delay replaces an assumed one by a
+      commit here: a change of rule, so every replay of the same code gives the same answer.
+    config:
+      column_types: {model: string, delay_hours: int64, delay_basis: string, has_radiation: bool}
+    columns:
+      - name: model
+        data_tests: [unique, not_null]
+      - name: delay_hours
+        description: Hours from a run's start until its forecast is available.
+        data_tests: [not_null]
+      - name: delay_basis
+        description: "`assumed` until measured from the live captures, then `measured`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [assumed, measured]
+

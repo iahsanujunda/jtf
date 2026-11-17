@@ -213,6 +213,207 @@ models:
           arguments:
             expression: not correction or (basis = 'captured' and known_at >= first_seen)
 
+  - name: dwd_weather_previous_runs
+    description: >
+      Open-Meteo Previous Runs as versions, per point, model, lead and hour (UTC), each model as the
+      source gave it: a hole stays a missing hour. The six variables are named with their units.
+    columns:
+      - name: point
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_points')
+                field: point
+      - name: model
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_models')
+                field: model
+      - name: lead_days
+        description: Days between the run and the hour (0 to 2). Features use 2; 0 and 1 serve the leak scenario F2.
+        data_tests: [not_null]
+      - name: valid_time
+        description: The hour, UTC, as Open-Meteo stamps it; radiation is the mean of the hour before.
+        data_tests: [not_null]
+      - name: known_at
+        description: The hour − 24 h × lead + the model's delay for a first version (basis rule); the fetch that first held a changed value for a later one (basis captured), never before the version it replaces.
+        data_tests: [not_null]
+      - name: known_until
+        description: When the next version became known; null for the current one.
+      - name: basis
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [rule, captured]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [point, model, lead_days, valid_time, known_at]
+      - expression_is_true:
+          arguments:
+            expression: known_until is null or known_until > known_at
+      - expression_is_true:
+          arguments:
+            expression: ghi_w_m2 >= 0 and direct_w_m2 >= 0 and diffuse_w_m2 >= 0
+      - expression_is_true:
+          arguments:
+            expression: cloud_cover_pct between 0 and 100
+      - expression_is_true:
+          arguments:
+            expression: not correction or (basis = 'captured' and known_at >= first_seen)
+
+  - name: dwd_weather_single_runs
+    description: >
+      Open-Meteo Single Runs as versions, per point, model, run and hour, runs never collapsed.
+    columns:
+      - name: point
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_points')
+                field: point
+      - name: model
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_models')
+                field: model
+      - name: run_time
+        description: The run's start, UTC.
+        data_tests: [not_null]
+      - name: valid_time
+        description: The hour, UTC, as Open-Meteo stamps it; radiation is the mean of the hour before.
+        data_tests: [not_null]
+      - name: known_at
+        description: The run's start + the model's delay (dim_weather_models), basis rule; a later changed copy, at its fetch.
+        data_tests: [not_null]
+      - name: known_until
+        description: When the next version became known; null for the current one.
+      - name: basis
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [rule, captured]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [point, model, run_time, valid_time, known_at]
+      - expression_is_true:
+          arguments:
+            expression: known_until is null or known_until > known_at
+      - expression_is_true:
+          arguments:
+            expression: ghi_w_m2 >= 0 and direct_w_m2 >= 0 and diffuse_w_m2 >= 0
+      - expression_is_true:
+          arguments:
+            expression: cloud_cover_pct between 0 and 100
+
+  - name: dwd_weather_live
+    description: >
+      The live forecast captured daily, per point, model, capture and hour, known at the fetch.
+    columns:
+      - name: point
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_points')
+                field: point
+      - name: model
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_weather_models')
+                field: model
+      - name: captured_at
+        description: "The fetch, each daily capture its own forecast."
+        data_tests: [not_null]
+      - name: valid_time
+        description: The hour, UTC, as Open-Meteo stamps it; radiation is the mean of the hour before.
+        data_tests: [not_null]
+      - name: known_at
+        description: The fetch.
+        data_tests: [not_null]
+      - name: known_until
+        description: When the next version became known; null for the current one.
+      - name: basis
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [captured]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [point, model, captured_at, valid_time, known_at]
+      - expression_is_true:
+          arguments:
+            expression: known_until is null or known_until > known_at
+      - expression_is_true:
+          arguments:
+            expression: ghi_w_m2 >= 0 and direct_w_m2 >= 0 and diffuse_w_m2 >= 0
+      - expression_is_true:
+          arguments:
+            expression: cloud_cover_pct between 0 and 100
+      - expression_is_true:
+          arguments:
+            expression: known_at = captured_at and known_until is null
+
+  - name: dwd_weather_slots
+    description: >
+      The three weather sources on 30-minute slots in JST, per source, point, model, lead or run or
+      capture, and slot, as versions: radiation from the hour ending after the slot, the rest
+      interpolated to the slot's middle; known once both hours are. No hole is filled here.
+    columns:
+      - name: source
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [previous_runs, single_runs, live]
+      - name: lead_days
+        description: Previous Runs only.
+      - name: run_time
+        description: Single Runs only.
+      - name: captured_at
+        description: The live capture only.
+      - name: slot_start
+        description: The slot's start (JST slots, stored as a timestamp).
+        data_tests: [not_null]
+      - name: known_at
+        description: When the later of the slot's two hours became known, or a later version of either.
+        data_tests: [not_null]
+      - name: known_until
+        description: When the slot's next version became known; null for the current one.
+      - name: basis
+        description: "`captured` when either hour's version is, else `rule`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [rule, captured]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [source, point, model, lead_days, run_time, captured_at, slot_start, known_at]
+      - expression_is_true:
+          arguments:
+            expression: known_until is null or known_until > known_at
+      - expression_is_true:
+          arguments:
+            expression: extract(minute from slot_start) in (0, 30) and extract(second from slot_start) = 0
+      - expression_is_true:
+          arguments:
+            expression: ghi_w_m2 >= 0 and cloud_cover_pct between 0 and 100
+
 unit_tests:
   # Times are UTC; JST is UTC+9. Capture start is the 08:45 JST daily capture of 2026-11-15
   # (2026-11-14 23:45 UTC). Slot A, 12:00 JST on 2026-11-14, has rule time 13:30 JST (04:30 UTC).
@@ -584,3 +785,93 @@ unit_tests:
     expect:
       rows:
         - {ref_date: "2026-06-30", point: mito, solar_mw: 21.05, known_at: "2026-12-11 23:45:30+00", known_until: null, basis: captured, first_seen: "2026-12-11 10:00:00+00", correction: false}
+
+  # Weather. Times are UTC. MSM's delay is 3 hours and GSM's 6 (dim_weather_models).
+
+  - name: weather_versions_take_the_rule_then_each_changed_fetch_never_earlier
+    description: >
+      MSM lead 2, hour 2026-11-10 03:00: known by the rule at 2026-11-08 06:00 (− 48 h + 3 h); its
+      file was parsed twice and only the newer parse counts; a later copy with the same value adds
+      nothing. GSM lead 0, hour 2026-11-14 23:00, rule time 2026-11-15 05:00: a copy fetched at
+      02:00 changed it, but a change is never known before the version it replaces, so both share
+      05:00 and the newer copy is kept; a copy on 16 November changed it again, known at that fetch.
+    model: dwd_weather_previous_runs
+    given:
+      - input: ref('dim_weather_models')
+        rows:
+          - {model: jma_msm, delay_hours: 3}
+          - {model: jma_gsm, delay_hours: 6}
+      - input: source('ods', 'openmeteo_previous_runs')
+        rows:
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-10 03:00:00+00", shortwave_radiation: 999, source_file: f1, fetched_at: "2026-11-15 00:00:00+00", ingested_at: "2026-11-15 01:00:00+00"}
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-10 03:00:00+00", shortwave_radiation: 300, source_file: f1, fetched_at: "2026-11-15 00:00:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {point: tokyo, model: jma_gsm, lead_days: 0, valid_time: "2026-11-14 23:00:00+00", temperature_2m: 10, source_file: f1, fetched_at: "2026-11-15 00:00:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {point: tokyo, model: jma_gsm, lead_days: 0, valid_time: "2026-11-14 23:00:00+00", temperature_2m: 11, source_file: f2, fetched_at: "2026-11-15 02:00:00+00", ingested_at: "2026-11-15 03:00:00+00"}
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-10 03:00:00+00", shortwave_radiation: 300, source_file: f3, fetched_at: "2026-11-16 03:00:00+00", ingested_at: "2026-11-16 04:00:00+00"}
+          - {point: tokyo, model: jma_gsm, lead_days: 0, valid_time: "2026-11-14 23:00:00+00", temperature_2m: 12, source_file: f3, fetched_at: "2026-11-16 03:00:00+00", ingested_at: "2026-11-16 04:00:00+00"}
+    expect:
+      rows:
+        - {model: jma_msm, lead_days: 2, ghi_w_m2: 300, temperature_c: null, known_at: "2026-11-08 06:00:00+00", known_until: null, basis: rule}
+        - {model: jma_gsm, lead_days: 0, ghi_w_m2: null, temperature_c: 11, known_at: "2026-11-15 05:00:00+00", known_until: "2026-11-16 03:00:00+00", basis: captured}
+        - {model: jma_gsm, lead_days: 0, ghi_w_m2: null, temperature_c: 12, known_at: "2026-11-16 03:00:00+00", known_until: null, basis: captured}
+
+  - name: a_single_run_is_known_its_models_delay_after_it_starts
+    description: >
+      MSM's run of 18:00 is known at 21:00, GSM's at 00:00 the next day; two runs of the same hour
+      stay two forecasts, never versions of each other.
+    model: dwd_weather_single_runs
+    given:
+      - input: ref('dim_weather_models')
+        rows:
+          - {model: jma_msm, delay_hours: 3}
+          - {model: jma_gsm, delay_hours: 6}
+      - input: source('ods', 'openmeteo_single_runs')
+        rows:
+          - {point: tokyo, model: jma_msm, run_time: "2026-11-14 18:00:00+00", valid_time: "2026-11-16 03:00:00+00", shortwave_radiation: 400, source_file: s1, fetched_at: "2026-11-16 05:00:00+00", ingested_at: "2026-11-16 06:00:00+00"}
+          - {point: tokyo, model: jma_msm, run_time: "2026-11-14 21:00:00+00", valid_time: "2026-11-16 03:00:00+00", shortwave_radiation: 420, source_file: s2, fetched_at: "2026-11-16 05:00:00+00", ingested_at: "2026-11-16 06:00:00+00"}
+          - {point: tokyo, model: jma_gsm, run_time: "2026-11-14 18:00:00+00", valid_time: "2026-11-16 03:00:00+00", temperature_2m: 15, source_file: s3, fetched_at: "2026-11-16 05:00:00+00", ingested_at: "2026-11-16 06:00:00+00"}
+    expect:
+      rows:
+        - {model: jma_msm, run_time: "2026-11-14 18:00:00+00", ghi_w_m2: 400, known_at: "2026-11-14 21:00:00+00", known_until: null, basis: rule}
+        - {model: jma_msm, run_time: "2026-11-14 21:00:00+00", ghi_w_m2: 420, known_at: "2026-11-15 00:00:00+00", known_until: null, basis: rule}
+        - {model: jma_gsm, run_time: "2026-11-14 18:00:00+00", ghi_w_m2: null, known_at: "2026-11-15 00:00:00+00", known_until: null, basis: rule}
+
+  - name: slots_take_radiation_from_the_hour_after_and_interpolate_the_rest
+    description: >
+      Tokyo, MSM, lead 2, the morning of 10 November (06:00 JST is 21:00 UTC on the 9th), as in
+      notebook 04, section 3.5, with values that interpolate exactly. Both slots of an hour take the
+      radiation stamped at its end; temperature is interpolated to the slot's middle (a quarter or
+      three quarters of the way to the next hour). A slot is known when the later of its hours is:
+      hour 20:00 was first held late, at 05:00 on the 8th, after hour 21:00, so the slots between
+      them wait for it rather than start without its temperature. The slots before 20:00 have no
+      hour before them: radiation only. Hour 23:00 was corrected on 16 November, radiation only:
+      the two slots taking their radiation from it get a second, captured version; the two
+      interpolating its unchanged temperature get none.
+    model: dwd_weather_slots
+    given:
+      - input: ref('dwd_weather_previous_runs')
+        rows:
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-09 20:00:00+00", ghi_w_m2: 0, temperature_c: 9, known_at: "2026-11-08 05:00:00+00", known_until: null, basis: rule}
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-09 21:00:00+00", ghi_w_m2: 0, temperature_c: 10, known_at: "2026-11-08 00:00:00+00", known_until: null, basis: rule}
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-09 22:00:00+00", ghi_w_m2: 5, temperature_c: 12, known_at: "2026-11-08 01:00:00+00", known_until: null, basis: rule}
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-09 23:00:00+00", ghi_w_m2: 59, temperature_c: 11, known_at: "2026-11-08 02:00:00+00", known_until: "2026-11-16 03:00:00+00", basis: rule}
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-09 23:00:00+00", ghi_w_m2: 60, temperature_c: 11, known_at: "2026-11-16 03:00:00+00", known_until: null, basis: captured}
+          - {point: tokyo, model: jma_msm, lead_days: 2, valid_time: "2026-11-10 00:00:00+00", ghi_w_m2: 185, temperature_c: 13, known_at: "2026-11-08 03:00:00+00", known_until: null, basis: rule}
+      - input: ref('dwd_weather_single_runs')
+        rows: []
+      - input: ref('dwd_weather_live')
+        rows: []
+    expect:
+      rows:
+        - {slot_start: "2026-11-09 19:00:00+00", ghi_w_m2: 0, temperature_c: null, known_at: "2026-11-08 05:00:00+00", known_until: null, basis: rule}
+        - {slot_start: "2026-11-09 19:30:00+00", ghi_w_m2: 0, temperature_c: null, known_at: "2026-11-08 05:00:00+00", known_until: null, basis: rule}
+        - {slot_start: "2026-11-09 20:00:00+00", ghi_w_m2: 0, temperature_c: 9.25, known_at: "2026-11-08 05:00:00+00", known_until: null, basis: rule}
+        - {slot_start: "2026-11-09 20:30:00+00", ghi_w_m2: 0, temperature_c: 9.75, known_at: "2026-11-08 05:00:00+00", known_until: null, basis: rule}
+        - {slot_start: "2026-11-09 21:00:00+00", ghi_w_m2: 5, temperature_c: 10.5, known_at: "2026-11-08 01:00:00+00", known_until: null, basis: rule}
+        - {slot_start: "2026-11-09 21:30:00+00", ghi_w_m2: 5, temperature_c: 11.5, known_at: "2026-11-08 01:00:00+00", known_until: null, basis: rule}
+        - {slot_start: "2026-11-09 22:00:00+00", ghi_w_m2: 59, temperature_c: 11.75, known_at: "2026-11-08 02:00:00+00", known_until: "2026-11-16 03:00:00+00", basis: rule}
+        - {slot_start: "2026-11-09 22:00:00+00", ghi_w_m2: 60, temperature_c: 11.75, known_at: "2026-11-16 03:00:00+00", known_until: null, basis: captured}
+        - {slot_start: "2026-11-09 22:30:00+00", ghi_w_m2: 59, temperature_c: 11.25, known_at: "2026-11-08 02:00:00+00", known_until: "2026-11-16 03:00:00+00", basis: rule}
+        - {slot_start: "2026-11-09 22:30:00+00", ghi_w_m2: 60, temperature_c: 11.25, known_at: "2026-11-16 03:00:00+00", known_until: null, basis: captured}
+        - {slot_start: "2026-11-09 23:00:00+00", ghi_w_m2: 185, temperature_c: 11.5, known_at: "2026-11-08 03:00:00+00", known_until: null, basis: rule}
+        - {slot_start: "2026-11-09 23:30:00+00", ghi_w_m2: 185, temperature_c: 12.5, known_at: "2026-11-08 03:00:00+00", known_until: null, basis: rule}
