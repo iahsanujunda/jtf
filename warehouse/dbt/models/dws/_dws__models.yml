@@ -33,6 +33,50 @@ models:
       - name: solar_d2_mw
         description: Solar output in the same slot on D−2, as known at T; null if nothing was.
 
+  - name: dws_capacity
+    description: >
+      Installed solar in the TEPCO area on target day D, as estimated at decision time T, in MW:
+      the least-squares line through the newest four releases known at T, by quarter, evaluated
+      at D, and the newest release carried beside it. One row per decision time.
+    data_tests:
+      # A figure describes a quarter that ended months before it became known.
+      - expression_is_true:
+          arguments:
+            expression: newest_ref_date < date(decision_time, 'Asia/Tokyo')
+      - expression_is_true:
+          arguments:
+            expression: newest_known_at <= decision_time
+      # Trend and carried figure stay within a few per cent (notebook 03: at most 2.9%); ten per
+      # cent apart means a unit or a join is wrong.
+      - expression_is_true:
+          arguments:
+            expression: abs(capacity_mw / capacity_carried_mw - 1) < 0.1
+      - expression_is_true:
+          arguments:
+            expression: releases = 4
+    columns:
+      - name: decision_time
+        data_tests: [unique, not_null]
+      - name: target_day
+        data_tests: [not_null]
+      - name: capacity_mw
+        description: The trend's value at D. Null with fewer than four releases known.
+        data_tests: [not_null]
+      - name: capacity_carried_mw
+        description: The newest release known at T, as it is.
+        data_tests: [not_null]
+      - name: capacity_slope_mw_per_day
+        description: The trend's slope, MW a day.
+      - name: newest_ref_date
+        description: The quarter the newest release known at T describes (its last day).
+      - name: oldest_ref_date
+        description: The quarter of the oldest of the four.
+      - name: newest_known_at
+        description: When the newest figure in use became known; a change marks a release day.
+      - name: releases
+        description: Releases in the fit, four unless fewer were known (always four from the first target day).
+        data_tests: [not_null]
+
 unit_tests:
   # T is 09:00 JST on 2026-11-16 (00:00 UTC); its target day is 2026-11-17, D−2 is 2026-11-15.
   - name: as_of_sees_only_what_was_known_at_t
@@ -60,3 +104,54 @@ unit_tests:
         - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:00:00+00", solar_d2_mw: 5000}
         - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:30:00+00", solar_d2_mw: 6500}
         - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 04:00:00+00", solar_d2_mw: null}
+
+  # dws_capacity. Times are UTC; T is 09:00 JST on D−1. The releases meant to be used lie on the
+  # line 20,000 MW at D = 2026-11-17 plus 2 MW a day, so the fit is exact; all others lie far off.
+
+  - name: the_trend_runs_through_the_newest_four_releases_known_at_t
+    description: >
+      At T on 2026-11-16: the newest four by quarter are end of June 2025 to end of March 2026
+      (its two parts summed), so the line gives 20,000 MW at D. End of June 2026, known one minute
+      after T, is unused; end of June 2017, known late (as in the data, from 2024) but describing
+      the oldest quarter, never counts as newest; end of December 2024 is the fifth. End of
+      December 2025's first figure was corrected before both decision times. At T on 2026-08-20,
+      end of March 2026 is not known yet: the four end at December 2025, and the line gives 19,824.
+    model: dws_capacity
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17"}
+          - {decision_time: "2026-08-20 00:00:00+00", target_day: "2026-08-21"}
+      - input: ref('dwd_capacity_area')
+        rows:
+          - {ref_date: "2017-06-30", point: mito, solar_mw: 5000, known_at: "2026-11-10 00:00:00+00", known_until: null}
+          - {ref_date: "2024-12-31", point: mito, solar_mw: 10000, known_at: "2025-05-20 15:00:00+00", known_until: null}
+          - {ref_date: "2025-03-31", point: mito, solar_mw: 18808, known_at: "2025-08-20 15:00:00+00", known_until: null}
+          - {ref_date: "2025-06-30", point: mito, solar_mw: 18990, known_at: "2025-11-20 15:00:00+00", known_until: null}
+          - {ref_date: "2025-09-30", point: mito, solar_mw: 19174, known_at: "2026-02-20 15:00:00+00", known_until: null}
+          - {ref_date: "2025-12-31", point: mito, solar_mw: 15000, known_at: "2026-05-20 15:00:00+00", known_until: "2026-07-01 00:00:00+00"}
+          - {ref_date: "2025-12-31", point: mito, solar_mw: 19358, known_at: "2026-07-01 00:00:00+00", known_until: null}
+          - {ref_date: "2026-03-31", point: mito, solar_mw: 19038, known_at: "2026-08-20 15:00:00+00", known_until: null}
+          - {ref_date: "2026-03-31", point: numazu, solar_mw: 500, known_at: "2026-08-20 15:00:00+00", known_until: null}
+          - {ref_date: "2026-06-30", point: mito, solar_mw: 30000, known_at: "2026-11-16 00:01:00+00", known_until: null}
+    expect:
+      rows:
+        - {decision_time: "2026-11-16 00:00:00+00", capacity_mw: 20000, capacity_carried_mw: 19538, capacity_slope_mw_per_day: 2, newest_ref_date: "2026-03-31", oldest_ref_date: "2025-06-30", newest_known_at: "2026-08-20 15:00:00+00", releases: 4}
+        - {decision_time: "2026-08-20 00:00:00+00", capacity_mw: 19824, capacity_carried_mw: 19358, capacity_slope_mw_per_day: 2, newest_ref_date: "2025-12-31", oldest_ref_date: "2025-03-31", newest_known_at: "2026-07-01 00:00:00+00", releases: 4}
+
+  - name: with_fewer_than_four_releases_known_there_is_no_trend
+    description: >
+      Only three releases are known at T: no line, but the newest figure is carried.
+    model: dws_capacity
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17"}
+      - input: ref('dwd_capacity_area')
+        rows:
+          - {ref_date: "2025-09-30", point: mito, solar_mw: 19174, known_at: "2026-02-20 15:00:00+00", known_until: null}
+          - {ref_date: "2025-12-31", point: mito, solar_mw: 19358, known_at: "2026-07-01 00:00:00+00", known_until: null}
+          - {ref_date: "2026-03-31", point: mito, solar_mw: 19538, known_at: "2026-08-20 15:00:00+00", known_until: null}
+    expect:
+      rows:
+        - {decision_time: "2026-11-16 00:00:00+00", capacity_mw: null, capacity_carried_mw: 19538, capacity_slope_mw_per_day: null, newest_ref_date: "2026-03-31", releases: 3}
