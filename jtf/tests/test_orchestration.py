@@ -125,48 +125,87 @@ def test_models_rebuild_on_their_own_and_seeds_only_by_hand():
         assert spec.automation_condition == expected, spec.key
 
 
+def test_the_manifest_is_downstream_of_every_ods_asset():
+    assert {dep.asset_key for dep in MANIFEST_SPEC.deps} == {a.key for a in ODS_ASSETS}
+
+
+class StandIns:
+    """Two ODS assets, the manifest, a DWD model and the spine, with the real automation condition.
+
+    Like the real ones, the ODS stand-ins report the manifest from their own step, and one run
+    parses both: `other` first, then `actuals`, which the model reads. `during_actuals` runs
+    inside the `actuals` step, while the run is still going.
+    """
+
+    def __init__(self):
+        days = dg.DailyPartitionsDefinition(start_date="2026-01-01", timezone="Asia/Tokyo")
+        other_key, actuals_key = dg.AssetKey(["ods", "other"]), dg.AssetKey(["ods", "actuals"])
+        self.model_key = dg.AssetKey(["dwd", "model"])
+        self.spine_key = dg.AssetKey(["dws", "spine"])
+        self.during_actuals = lambda: None
+
+        @dg.asset(key=other_key, partitions_def=days)
+        def other(context: dg.AssetExecutionContext):
+            context.log_event(dg.AssetMaterialization(asset_key=MANIFEST_KEY))
+
+        @dg.asset(key=actuals_key, deps=[other_key], partitions_def=days)
+        def actuals(context: dg.AssetExecutionContext):
+            self.during_actuals()
+            context.log_event(dg.AssetMaterialization(asset_key=MANIFEST_KEY))
+
+        manifest = dg.AssetSpec(MANIFEST_KEY, deps=[other_key, actuals_key])
+        rebuild = REBUILD_ON_UPDATE
+
+        @dg.asset(
+            key=self.model_key, deps=[actuals_key, MANIFEST_KEY], automation_condition=rebuild
+        )
+        def model(): ...
+
+        @dg.asset(key=self.spine_key, deps=[MANIFEST_KEY], automation_condition=rebuild)
+        def spine(): ...
+
+        self.ods, self.models = [other, actuals], [model, spine]
+        self.defs = dg.Definitions(assets=[other, actuals, manifest, model, spine])
+        self.instance = dg.DagsterInstance.ephemeral()
+        self.cursor = None
+
+    def requested(self):
+        result = dg.evaluate_automation_conditions(self.defs, self.instance, cursor=self.cursor)
+        self.cursor = result.cursor
+        keys = (self.model_key, self.spine_key)
+        return {key for key in keys if result.get_num_requested(key)}
+
+    def parse(self, day):
+        dg.materialize(self.ods, partition_key=day, instance=self.instance)
+
+    def build(self):
+        dg.materialize(self.models, instance=self.instance)
+        assert self.requested() == set()
+
+
 def test_models_rebuild_after_any_parse_even_with_a_day_never_parsed():
-    # Stand-ins with the real condition; a parse reports the manifest, as an ODS asset does.
-    days = dg.DailyPartitionsDefinition(start_date="2026-01-01", timezone="Asia/Tokyo")
-    ods_key_, model_key, spine_key = (
-        dg.AssetKey(["ods", "stand_in"]),
-        dg.AssetKey(["dwd", "model"]),
-        dg.AssetKey(["dws", "spine"]),
-    )
+    s = StandIns()
+    both = {s.model_key, s.spine_key}
+    assert s.requested() == set()
+    s.parse("2026-01-02")
+    assert s.requested() == both
+    s.build()
+    s.parse("2026-01-04")  # 2026-01-03 never parsed, as after a failed capture: no block
+    assert s.requested() == both
+    s.build()
+    s.parse("2026-01-02")  # an old day parsed again
+    assert s.requested() == both
 
-    @dg.asset(key=ods_key_, partitions_def=days)
-    def ods(context: dg.AssetExecutionContext):
-        context.log_event(dg.AssetMaterialization(asset_key=MANIFEST_KEY))
 
-    @dg.asset(key=model_key, deps=[ods_key_, MANIFEST_KEY], automation_condition=REBUILD_ON_UPDATE)
-    def model(): ...
+def test_models_wait_for_the_whole_parse_not_its_first_step():
+    # On 2026-11-17 the spine rebuilt after the first step reported the manifest, ahead of the DWD
+    # it is joined with, and D-2 came out incomplete until the next rebuild.
+    s = StandIns()
+    seen = []
+    s.during_actuals = lambda: seen.append(s.requested())
+    assert s.requested() == set()
 
-    @dg.asset(key=spine_key, deps=[MANIFEST_KEY], automation_condition=REBUILD_ON_UPDATE)
-    def spine(): ...
+    s.parse("2026-01-02")
 
-    stand_ins = dg.Definitions(assets=[ods, MANIFEST_SPEC, model, spine])
-    instance = dg.DagsterInstance.ephemeral()
-    cursor = None
-
-    def requested():
-        nonlocal cursor
-        result = dg.evaluate_automation_conditions(stand_ins, instance, cursor=cursor)
-        cursor = result.cursor
-        return {key for key in (model_key, spine_key) if result.get_num_requested(key)}
-
-    def parse(day):
-        dg.materialize([ods], partition_key=day, instance=instance)
-
-    def build():
-        dg.materialize([model, spine], instance=instance)
-        assert requested() == set()
-
-    assert requested() == set()
-    parse("2026-01-02")
-    assert requested() == {model_key, spine_key}
-    build()
-    parse("2026-01-04")  # 2026-01-03 never parsed, as after a failed capture: no block
-    assert requested() == {model_key, spine_key}
-    build()
-    parse("2026-01-02")  # an old day parsed again
-    assert requested() == {model_key, spine_key}
+    assert seen == [set()]  # the manifest was updated, but the parse was still running
+    assert s.requested() == {s.model_key, s.spine_key}  # then both, together
