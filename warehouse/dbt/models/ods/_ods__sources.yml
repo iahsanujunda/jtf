@@ -15,3 +15,9 @@ sources:
         description: >
           TEPCO's monthly area actuals, one row per slot per capture, in MW averaged over the
           slot, labelled by the slot's start (`date` as 2026/11/1, `time` as 0:00).
+      - name: meti_fit_notices
+        description: >
+          Each announcement of a FIT/FIP capacity release, as one stored copy of METI's summary
+          page showed it: the month-end the release describes (`ref_date`) and the date given
+          (`announced`). Copies archived by the Wayback Machine carry the archive's time as
+          `source_time`; our own captures have none.
