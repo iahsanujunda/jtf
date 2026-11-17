@@ -162,6 +162,92 @@ models:
           arguments:
             expression: ref_date = last_day(ref_date) and extract(month from ref_date) in (3, 6, 9, 12)
 
+  - name: dwd_capacity_area_files
+    description: >
+      Installed solar per raw capacity file and part of the TEPCO area, in MW: new and transferred
+      installations, under and over 10 kW, each file as last parsed. Incremental: a run reads only
+      the files whose newest parse it doesn't hold, and BigQuery reads only their partitions and
+      blocks (macro only_files). No known_at: dwd_capacity_area versions these.
+    columns:
+      - name: source_file
+        description: The raw file, as the manifest's `path`.
+        data_tests: [not_null]
+      - name: point
+        description: The weather point of the part (seed tepco_area_parts).
+        data_tests: [not_null]
+      - name: ref_date
+        data_tests: [not_null]
+      - name: meti_table
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [pref, city]
+      - name: fetched_at
+        description: When the file was fetched.
+        data_tests: [not_null]
+      - name: parsed_at
+        description: "`ingested_at` of the file's newest parse in the manifest: what the model holds."
+        data_tests: [not_null]
+      - name: meti_areas
+        description: How many of METI's areas were summed into the part (20 for numazu, else 1).
+      - name: solar_mw
+        description: MW, from METI's kW summed exactly (as NUMERIC).
+        data_tests: [not_null]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [source_file, point]
+      - expression_is_true:
+          arguments:
+            expression: solar_mw > 0
+
+  - name: dwd_capacity_area
+    description: >
+      Installed solar per capacity release and part of the TEPCO area, in MW, as versions. Read for
+      a decision time only through `as_of`. A release's first version is known when the release is;
+      a re-fetched file with changed figures is a later version (notebook 04, sections 6.6 to 6.8).
+    columns:
+      - name: ref_date
+        description: The quarter's last day, the date the figures describe.
+        data_tests: [not_null]
+      - name: point
+        description: The weather point of the part (seed tepco_area_parts).
+        data_tests: [not_null]
+      - name: solar_mw
+        data_tests: [not_null]
+      - name: known_at
+        description: When we could have had this version. Never the parse time.
+        data_tests: [not_null]
+      - name: known_until
+        description: When the next version became known; null for the current one.
+      - name: basis
+        description: >
+          The release's basis for a first version (`rule` or `captured`); `captured` for a later
+          one, known at the fetch of the file holding it.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [rule, captured]
+      - name: first_seen
+        description: Fetch time of the first file holding this value.
+        data_tests: [not_null]
+      - name: source_file
+        description: That file.
+        data_tests: [not_null]
+      - name: correction
+        description: True when this version replaced earlier figures.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [ref_date, point, known_at]
+      - expression_is_true:
+          arguments:
+            expression: known_until is null or known_until > known_at
+      - expression_is_true:
+          arguments:
+            expression: not correction or (basis = 'captured' and known_at >= first_seen)
+
 unit_tests:
   # Times are UTC; JST is UTC+9. Capture start is the 08:45 JST daily capture of 2026-11-15
   # (2026-11-14 23:45 UTC). Slot A, 12:00 JST on 2026-11-14, has rule time 13:30 JST (04:30 UTC).
@@ -383,3 +469,153 @@ unit_tests:
     expect:
       rows:
         - {ref_date: "2026-03-31", known_at: "2026-08-20 15:00:00+00", basis: rule, rule: announced, announced: "2026-08-20"}
+
+  # dwd_capacity_area_files and dwd_capacity_area. Times are UTC. A file is named for short; in
+  # ODS it is the raw path. Solar is sheet ②－１ (new) and ②－２ (transferred), under and over 10 kW;
+  # ODS holds kW, the models MW.
+
+  - name: the_figure_is_new_and_transferred_solar_of_both_sizes_in_each_part
+    description: >
+      Ibaraki (mito) is the sum of both sheets and both sizes from the file's newest parse, without
+      the counts sheet, wind, or the old parse. Numazu is Numazu and Fuji from table B. Nagano,
+      the national total and Shizuoka city (west of the Fuji River) are outside the area.
+    model: dwd_capacity_area_files
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {path: fA, ods_table: meti_fit_capacity_pref, status: parsed, extraction_date: "2026-11-16", ingested_at: "2026-11-16 00:50:00+00"}
+          - {path: fA, ods_table: meti_fit_capacity_pref, status: parsed, extraction_date: "2026-11-16", ingested_at: "2026-11-16 01:00:00+00"}
+          - {path: fB, ods_table: meti_fit_capacity_city, status: parsed, extraction_date: "2026-11-16", ingested_at: "2026-11-16 01:00:00+00"}
+      - input: source('ods', 'meti_fit_capacity_pref')
+        rows:
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－１, area: 茨城県, path: 太陽光発電設備/10kW未満, value: 1, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 00:50:00+00"}
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－１, area: 茨城県, path: 太陽光発電設備/10kW未満, value: 100, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－１, area: 茨城県, path: 太陽光発電設備/10kW以上, value: 200, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－２, area: 茨城県, path: 太陽光発電設備/10kW未満, value: 10, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－２, area: 茨城県, path: 太陽光発電設備/10kW以上, value: 20, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－１, area: 茨城県, path: 風力発電設備/20kW未満, value: 999, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A①－１, area: 茨城県, path: 太陽光発電設備/10kW未満, value: 7, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－１, area: 長野県, path: 太陽光発電設備/10kW未満, value: 300, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－１, area: 合計, path: 太陽光発電設備/10kW未満, value: 5000, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+      - input: source('ods', 'meti_fit_capacity_city')
+        rows:
+          - {source_file: fB, ref_date: "2026-03-31", sheet: 表B②－１, area: 静岡県沼津市, path: 太陽光発電設備/10kW未満, value: 50, fetched_at: "2026-11-16 00:43:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fB, ref_date: "2026-03-31", sheet: 表B②－２, area: 静岡県富士市, path: 太陽光発電設備/10kW以上, value: 5, fetched_at: "2026-11-16 00:43:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fB, ref_date: "2026-03-31", sheet: 表B②－１, area: 静岡県静岡市, path: 太陽光発電設備/10kW未満, value: 1000, fetched_at: "2026-11-16 00:43:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+      - input: ref('tepco_area_parts')
+        rows:
+          - {meti_table: pref, meti_area: 茨城県, point: mito}
+          - {meti_table: city, meti_area: 静岡県沼津市, point: numazu}
+          - {meti_table: city, meti_area: 静岡県富士市, point: numazu}
+    expect:
+      rows:
+        - {source_file: fA, point: mito, ref_date: "2026-03-31", meti_table: pref, parsed_at: "2026-11-16 01:00:00+00", meti_areas: 1, solar_mw: 0.33}
+        - {source_file: fB, point: numazu, ref_date: "2026-03-31", meti_table: city, parsed_at: "2026-11-16 01:00:00+00", meti_areas: 2, solar_mw: 0.055}
+
+  - name: an_incremental_run_reads_only_files_whose_newest_parse_it_lacks
+    description: >
+      The table holds fA and fC at their parse of 01:00. fB is new; fC was parsed again (a new
+      parser version); fD's parse started before 01:00 but finished after the last run, so a
+      watermark on parse time would miss it. The run reads fB, fC as last parsed and fD, not fA.
+    model: dwd_capacity_area_files
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: this
+        format: sql
+        rows: |
+          select 'fA' as source_file, 'mito' as point, date '2026-03-31' as ref_date,
+                 'pref' as meti_table, timestamp '2026-11-16 00:42:00+00' as fetched_at,
+                 timestamp '2026-11-16 01:00:00+00' as parsed_at, 1 as meti_areas, 0.1 as solar_mw
+          union all
+          select 'fC', 'mito', date '2025-12-31', 'pref', timestamp '2026-11-16 00:40:00+00',
+                 timestamp '2026-11-16 01:00:00+00', 1, 0.1
+      - input: source('ods', 'raw_files')
+        rows:
+          - {path: fA, ods_table: meti_fit_capacity_pref, status: parsed, extraction_date: "2026-11-16", ingested_at: "2026-11-16 01:00:00+00"}
+          - {path: fB, ods_table: meti_fit_capacity_city, status: parsed, extraction_date: "2026-12-01", ingested_at: "2026-12-01 00:00:00+00"}
+          - {path: fC, ods_table: meti_fit_capacity_pref, status: parsed, extraction_date: "2026-11-16", ingested_at: "2026-11-16 01:00:00+00"}
+          - {path: fC, ods_table: meti_fit_capacity_pref, status: parsed, extraction_date: "2026-11-16", ingested_at: "2026-12-02 00:00:00+00"}
+          - {path: fD, ods_table: meti_fit_capacity_pref, status: parsed, extraction_date: "2026-11-16", ingested_at: "2026-11-16 00:50:00+00"}
+      - input: source('ods', 'meti_fit_capacity_pref')
+        rows:
+          - {source_file: fA, ref_date: "2026-03-31", sheet: 表A②－１, area: 茨城県, path: 太陽光発電設備/10kW未満, value: 100, fetched_at: "2026-11-16 00:42:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fC, ref_date: "2025-12-31", sheet: 表A②－１, area: 茨城県, path: 太陽光発電設備/10kW未満, value: 100, fetched_at: "2026-11-16 00:40:00+00", ingested_at: "2026-11-16 01:00:00+00"}
+          - {source_file: fC, ref_date: "2025-12-31", sheet: 表A②－１, area: 茨城県, path: 太陽光発電設備/10kW未満, value: 120, fetched_at: "2026-11-16 00:40:00+00", ingested_at: "2026-12-02 00:00:00+00"}
+          - {source_file: fD, ref_date: "2025-09-30", sheet: 表A②－１, area: 茨城県, path: 太陽光発電設備/10kW未満, value: 70, fetched_at: "2026-11-16 00:38:00+00", ingested_at: "2026-11-16 00:50:00+00"}
+      - input: source('ods', 'meti_fit_capacity_city')
+        rows:
+          - {source_file: fB, ref_date: "2026-06-30", sheet: 表B②－１, area: 静岡県沼津市, path: 太陽光発電設備/10kW未満, value: 50, fetched_at: "2026-11-30 23:45:00+00", ingested_at: "2026-12-01 00:00:00+00"}
+      - input: ref('tepco_area_parts')
+        rows:
+          - {meti_table: pref, meti_area: 茨城県, point: mito}
+          - {meti_table: city, meti_area: 静岡県沼津市, point: numazu}
+    expect:
+      rows:
+        - {source_file: fB, point: numazu, parsed_at: "2026-12-01 00:00:00+00", solar_mw: 0.05}
+        - {source_file: fC, point: mito, parsed_at: "2026-12-02 00:00:00+00", solar_mw: 0.12}
+        - {source_file: fD, point: mito, parsed_at: "2026-11-16 00:50:00+00", solar_mw: 0.07}
+
+  - name: a_releases_first_figures_are_known_when_the_release_is
+    description: >
+      End of March 2026's table A was fetched in November 2026, but the release is known by the
+      rule on 2026-08-20 (end of day JST): its figures are known then, with the release's basis.
+    model: dwd_capacity_area
+    given:
+      - input: ref('dwd_capacity_area_files')
+        rows:
+          - {source_file: fA, point: mito, ref_date: "2026-03-31", fetched_at: "2026-11-16 00:42:00+00", solar_mw: 20}
+      - input: ref('dwd_capacity_releases')
+        rows:
+          - {ref_date: "2026-03-31", known_at: "2026-08-20 15:00:00+00", basis: rule}
+    expect:
+      rows:
+        - {ref_date: "2026-03-31", point: mito, solar_mw: 20, known_at: "2026-08-20 15:00:00+00", known_until: null, basis: rule, first_seen: "2026-11-16 00:42:00+00", correction: false}
+
+  - name: a_refetched_file_is_a_new_version_only_if_its_figures_changed
+    description: >
+      Table A of end of March 2026 is fetched again on 2026-12-02 JST with Ibaraki changed and
+      Kanagawa not, then again a day later unchanged. Ibaraki gets a second version known at the
+      first re-fetch; Kanagawa keeps one.
+    model: dwd_capacity_area
+    given:
+      - input: ref('dwd_capacity_area_files')
+        rows:
+          - {source_file: fA, point: mito, ref_date: "2026-03-31", fetched_at: "2026-11-16 00:42:00+00", solar_mw: 20}
+          - {source_file: fA, point: yokohama, ref_date: "2026-03-31", fetched_at: "2026-11-16 00:42:00+00", solar_mw: 30}
+          - {source_file: fA2, point: mito, ref_date: "2026-03-31", fetched_at: "2026-12-01 23:45:00+00", solar_mw: 20.1}
+          - {source_file: fA2, point: yokohama, ref_date: "2026-03-31", fetched_at: "2026-12-01 23:45:00+00", solar_mw: 30}
+          - {source_file: fA3, point: mito, ref_date: "2026-03-31", fetched_at: "2026-12-02 23:45:00+00", solar_mw: 20.1}
+          - {source_file: fA3, point: yokohama, ref_date: "2026-03-31", fetched_at: "2026-12-02 23:45:00+00", solar_mw: 30}
+      - input: ref('dwd_capacity_releases')
+        rows:
+          - {ref_date: "2026-03-31", known_at: "2026-08-20 15:00:00+00", basis: rule}
+    expect:
+      rows:
+        - {point: mito, solar_mw: 20, known_at: "2026-08-20 15:00:00+00", known_until: "2026-12-01 23:45:00+00", basis: rule, correction: false}
+        - {point: mito, solar_mw: 20.1, known_at: "2026-12-01 23:45:00+00", known_until: null, basis: captured, correction: true}
+        - {point: yokohama, solar_mw: 30, known_at: "2026-08-20 15:00:00+00", known_until: null, basis: rule, correction: false}
+
+  - name: a_file_fetched_again_before_its_release_was_known_counts_once
+    description: >
+      End of June 2026: table A is fetched on 2026-12-11 JST, again later that day with Ibaraki
+      changed, and the release is known only at the next morning's fetch of table B. Its one
+      version is the later copy, known with the release. End of September 2026 has no date in
+      dwd_capacity_releases yet (one table held), so it has no figures.
+    model: dwd_capacity_area
+    given:
+      - input: ref('dwd_capacity_area_files')
+        rows:
+          - {source_file: fA6, point: mito, ref_date: "2026-06-30", fetched_at: "2026-12-10 23:45:30+00", solar_mw: 21}
+          - {source_file: fA6b, point: mito, ref_date: "2026-06-30", fetched_at: "2026-12-11 10:00:00+00", solar_mw: 21.05}
+          - {source_file: fA9, point: mito, ref_date: "2026-09-30", fetched_at: "2027-02-10 23:45:30+00", solar_mw: 22}
+      - input: ref('dwd_capacity_releases')
+        rows:
+          - {ref_date: "2026-06-30", known_at: "2026-12-11 23:45:30+00", basis: captured}
+    expect:
+      rows:
+        - {ref_date: "2026-06-30", point: mito, solar_mw: 21.05, known_at: "2026-12-11 23:45:30+00", known_until: null, basis: captured, first_seen: "2026-12-11 10:00:00+00", correction: false}
