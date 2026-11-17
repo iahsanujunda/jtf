@@ -23,9 +23,14 @@ AC = dg.AutomationCondition
 
 # A model rebuilds when any of its inputs updates. Not `eager()`: an unpartitioned model under the
 # day-partitioned ODS assets would wait until every day had been parsed, so a single failed
-# capture would stop it for good.
+# capture would stop it for good. Nor while an input's own inputs are being built: a parse reports
+# the manifest from its first step, and on 2026-11-17 the decision-time spine rebuilt then, ahead
+# of the DWD it is joined with, so D−2 was incomplete for a minute.
 REBUILD_ON_UPDATE = (
-    AC.any_deps_updated().since_last_handled() & ~AC.any_deps_in_progress() & ~AC.in_progress()
+    AC.any_deps_updated().since_last_handled()
+    & ~AC.any_deps_in_progress()
+    & ~AC.any_deps_match(AC.any_deps_in_progress())
+    & ~AC.in_progress()
 ).with_label("rebuild_on_update")
 
 
