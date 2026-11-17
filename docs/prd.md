@@ -111,7 +111,7 @@ This is the core of the project: every input carries when it became known, every
 | Weather, Previous Runs | – | Valid hour − 48 h + the model's availability delay (MSM 3 h, GSM and ECMWF 6 h), for `previous_day2`. `previous_day1` is **not** allowed: for midday slots of D it comes from a run issued after `T` | All slots of D: even D's last hour − 48 h + 6 h lands before `T` |
 | Weather, Single Runs (from 2026-04-02) | – | Run start + assumed availability delay (MSM 3 h, GSM and ECMWF 6 h), replaced by measured delays from our captures | The latest run with `known_at ≤ T` |
 | Weather, live | Fetch time (the response names no run) | – | The run fetched at `T` |
-| Solar capacity estimate | Fetch time of the first capture of a release | The end of the latest announcement date any stored copy of the publisher's page showed, never before the file's own date: the publisher later moved its dates earlier | The newest release with `known_at ≤ T`, extended to D by its recent trend |
+| Solar capacity estimate | Fetch time of the first capture holding a release's files | The end of the latest announcement date any copy of the publisher's page taken before capture start showed, never before the file's own date: the publisher later moved its dates earlier | The newest release with `known_at ≤ T`, extended to D by its recent trend |
 | Holiday calendar, weather points, settings | Pinned in the image | Pinned in the image | Whatever the run's image digest contains |
 
 **Time machine**
