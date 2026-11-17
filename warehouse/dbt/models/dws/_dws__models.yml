@@ -29,9 +29,22 @@ models:
       - unique_combination:
           arguments:
             columns: [decision_time, slot_start]
+      # Haurwitz tops out near 1,010 W/m² at Tokyo's highest sun, so clear sky stays within about
+      # 1% of capacity; ten per cent over means a unit or a weight is wrong.
+      - expression_is_true:
+          arguments:
+            expression: clear_sky_mw >= 0 and clear_sky_mw <= 1.1 * capacity_mw
     columns:
       - name: solar_d2_mw
         description: Solar output in the same slot on D−2, as known at T; null if nothing was.
+      - name: capacity_mw
+        description: Installed solar on D as estimated at T (dws_capacity).
+        data_tests: [not_null]
+      - name: clear_sky_mw
+        description: >
+          Output a cloudless slot would allow: capacity × the capacity-weighted clear-sky radiation
+          at the nine points ÷ 1000 W/m². The fleet as flat panels at nameplate.
+        data_tests: [not_null]
 
   - name: dws_capacity
     description: >
@@ -77,6 +90,33 @@ models:
         description: Releases in the fit, four unless fewer were known (always four from the first target day).
         data_tests: [not_null]
 
+  - name: dws_point_weights
+    description: >
+      Each weather point's weight at decision time T: its part of the TEPCO area's installed solar
+      in the newest release known at T. Weights the clear-sky radiation, and later the weather.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [decision_time, point]
+      - expression_is_true:
+          arguments:
+            expression: weight > 0 and weight < 1
+    columns:
+      - name: decision_time
+        data_tests: [not_null]
+      - name: point
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('weather_points')
+                field: point
+      - name: ref_date
+        description: The quarter of the release the weights come from.
+        data_tests: [not_null]
+      - name: weight
+        data_tests: [not_null]
+
 unit_tests:
   # T is 09:00 JST on 2026-11-16 (00:00 UTC); its target day is 2026-11-17, D−2 is 2026-11-15.
   - name: as_of_sees_only_what_was_known_at_t
@@ -99,6 +139,12 @@ unit_tests:
           - {slot_start: "2026-11-15 03:30:00+00", measure: solar, value_mw: 6000, known_at: "2026-11-15 05:32:00+00", known_until: "2026-11-16 00:00:00+00"}
           - {slot_start: "2026-11-15 03:30:00+00", measure: solar, value_mw: 6500, known_at: "2026-11-16 00:00:00+00", known_until: null}
           - {slot_start: "2026-11-15 04:00:00+00", measure: solar, value_mw: 7000, known_at: "2026-11-16 00:30:00+00", known_until: null}
+      - input: ref('dws_capacity')
+        rows: []
+      - input: ref('dws_point_weights')
+        rows: []
+      - input: ref('dwd_sun_slots')
+        rows: []
     expect:
       rows:
         - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:00:00+00", solar_d2_mw: 5000}
@@ -155,3 +201,60 @@ unit_tests:
     expect:
       rows:
         - {decision_time: "2026-11-16 00:00:00+00", capacity_mw: null, capacity_carried_mw: 19538, capacity_slope_mw_per_day: null, newest_ref_date: "2026-03-31", releases: 3}
+
+  # dws_point_weights and clear sky in dws_solar_features. T is 09:00 JST on 2026-11-16 (00:00 UTC).
+
+  - name: weights_are_each_points_share_of_the_newest_release_known_at_t
+    description: >
+      End of March 2026 is the newest release known at T, with mito's figure corrected before T:
+      the weights are its corrected shares, 0.75 and 0.25. End of June 2026, known one minute after
+      T, and end of December 2025, older, are unused.
+    model: dws_point_weights
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00"}
+      - input: ref('dwd_capacity_area')
+        rows:
+          - {ref_date: "2025-12-31", point: mito, solar_mw: 100, known_at: "2026-07-01 00:00:00+00", known_until: null}
+          - {ref_date: "2025-12-31", point: numazu, solar_mw: 100, known_at: "2026-07-01 00:00:00+00", known_until: null}
+          - {ref_date: "2026-03-31", point: mito, solar_mw: 500, known_at: "2026-08-20 15:00:00+00", known_until: "2026-10-01 00:00:00+00"}
+          - {ref_date: "2026-03-31", point: mito, solar_mw: 300, known_at: "2026-10-01 00:00:00+00", known_until: null}
+          - {ref_date: "2026-03-31", point: numazu, solar_mw: 100, known_at: "2026-08-20 15:00:00+00", known_until: null}
+          - {ref_date: "2026-06-30", point: mito, solar_mw: 900, known_at: "2026-11-16 00:01:00+00", known_until: null}
+          - {ref_date: "2026-06-30", point: numazu, solar_mw: 900, known_at: "2026-11-16 00:01:00+00", known_until: null}
+    expect:
+      rows:
+        - {decision_time: "2026-11-16 00:00:00+00", point: mito, ref_date: "2026-03-31", weight: 0.75}
+        - {decision_time: "2026-11-16 00:00:00+00", point: numazu, ref_date: "2026-03-31", weight: 0.25}
+
+  - name: clear_sky_is_capacity_times_the_weighted_radiation
+    description: >
+      At 12:00 JST on D, mito (weight 0.75) has 800 W/m² of clear sky and numazu (0.25) 400: the
+      weighted radiation is 700 W/m², and 20,000 MW of capacity gives 14,000 MW. At 00:00 JST the
+      sun is down at both: zero.
+    model: dws_solar_features
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:00:00+00"}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-16 15:00:00+00"}
+      - input: ref('dwd_tepco_actuals')
+        rows: []
+      - input: ref('dws_capacity')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", capacity_mw: 20000}
+      - input: ref('dws_point_weights')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", point: mito, weight: 0.75}
+          - {decision_time: "2026-11-16 00:00:00+00", point: numazu, weight: 0.25}
+      - input: ref('dwd_sun_slots')
+        rows:
+          - {point: mito, slot_start: "2026-11-17 03:00:00+00", clear_sky_ghi: 800}
+          - {point: numazu, slot_start: "2026-11-17 03:00:00+00", clear_sky_ghi: 400}
+          - {point: mito, slot_start: "2026-11-16 15:00:00+00", clear_sky_ghi: 0}
+          - {point: numazu, slot_start: "2026-11-16 15:00:00+00", clear_sky_ghi: 0}
+    expect:
+      rows:
+        - {slot_start: "2026-11-17 03:00:00+00", capacity_mw: 20000, clear_sky_mw: 14000}
+        - {slot_start: "2026-11-16 15:00:00+00", capacity_mw: 20000, clear_sky_mw: 0}
