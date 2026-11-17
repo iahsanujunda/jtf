@@ -7,7 +7,7 @@ Day-ahead forecasts of Tokyo-area solar output and JEPX Tokyo-area prices, for t
 | Path | What lives there |
 | --- | --- |
 | [jtf/](jtf/) | The `jtf` Python package: all logic outside SQL, the Dagster definitions, the CLI, and its unit tests |
-| [warehouse/dbt/](warehouse/dbt/) | dbt-bigquery project: ODS → DWD → DWS → ADS, monitoring, with its dbt tests and SQL rules |
+| [warehouse/dbt/](warehouse/dbt/) | dbt-bigquery project: ODS → DWD → DWS → ADS, with DIM beside them for what never changes, and monitoring; its dbt tests and SQL rules |
 | [e2e_tests/](e2e_tests/) | Only what crosses components: the time machine and one day end to end |
 | [notebooks/](notebooks/) | Exploration only; reads dev tables |
 | [deploy/](deploy/) | Everything GCP-specific: settings contract, Terraform, Dagster deployment, scripts |

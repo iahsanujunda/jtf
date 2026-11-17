@@ -149,7 +149,7 @@
   <g text-anchor="middle">
     <text x="640" y="506" font-size="14" font-weight="700">BigQuery</text>
     <text x="640" y="526" font-size="12">ODS → DWD → DWS → ADS</text>
-    <text x="640" y="544" font-size="12" fill="#6B7280">+ monitoring tables</text>
+    <text x="640" y="544" font-size="12" fill="#6B7280">+ DIM · monitoring tables</text>
     <text x="865" y="506" font-size="14" font-weight="700">Model files</text>
     <text x="865" y="526" font-size="12">Cloud Storage</text>
     <text x="865" y="544" font-size="12" fill="#6B7280">+ production pointer</text>
