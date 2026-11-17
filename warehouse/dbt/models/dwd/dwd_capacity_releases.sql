@@ -11,9 +11,9 @@
 #}
 
 with capture_start as (
-    select min(fetched_at) as t
-    from {{ source('ods', 'raw_files') }}
-    where source = 'meti_fit_capacity' and load_type = 'daily'
+    select min(known_at) as t
+    from {{ ref('dwd_source_captures') }}
+    where source = 'meti_fit_capacity'
 ),
 
 -- A re-parse appends a copy's rows again under a new parser_version: read each copy as last parsed.

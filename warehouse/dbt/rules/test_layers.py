@@ -22,10 +22,9 @@ READS = {
     "ads": {"dim", "dwd", "dws", "ads"},
 }
 
-# The one read that breaks the rule today, each to go when it is fixed (the last test fails once it
-# is no longer there). The decision-time spine reads the newest daily capture from the ODS manifest
-# until dwd_source_captures holds it (docs/phase1/progress.md, Next, step 5 item 4).
-KNOWN = {("model.jtf.dws_decision_slots", "source.jtf.ods.raw_files")}
+# Reads that break the rule, each to go when it is fixed (the last test fails once one is no longer
+# there). None since 2026-11-18: the decision-time spine reads dwd_source_captures, not ODS.
+KNOWN: set[tuple[str, str]] = set()
 
 
 @pytest.fixture(scope="module")
