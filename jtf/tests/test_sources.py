@@ -159,11 +159,11 @@ def test_fit_links_fail_loudly_when_the_page_links_nothing():
         fit_links(b"<html><body>maintenance</body></html>")
 
 
-def test_fit_daily_capture_is_the_page_and_each_linked_release_once():
+def test_fit_daily_capture_is_the_page_and_each_linked_release_watched():
     (page,) = get_source("meti_fit_capacity").items(NOW)
     assert page.filename == "PublicInfoSummary.html" and page.expand is not None
     linked = page.expand(FIT_PAGE_FIXTURE.read_bytes())
-    assert len(linked) == 66 and all(i.once for i in linked)
+    assert len(linked) == 66 and all(i.watched for i in linked)
 
 
 def test_fit_history_adds_every_archived_copy_of_the_page():

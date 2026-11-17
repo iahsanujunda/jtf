@@ -3,7 +3,8 @@
 The fetch time recorded here becomes `known_at`, so this is the one place that reads the clock.
 
 Three modes:
-- daily: the scheduled capture; always downloads, so every day records what was there
+- daily: the scheduled capture; always downloads, so every day records what was there, except a
+  watched file it already holds: then only its headers, and a download if `Last-Modified` changed
 - initial: the one-off history load; skips what is already stored, so it can stop and resume
 - recapture: checks every file for rewrites with `If-Modified-Since`; stores only what changed
 
@@ -18,8 +19,9 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -253,6 +255,27 @@ def _last_modified(store: Store, path: str) -> str | None:
     return headers.get("last-modified")
 
 
+def _replaced(
+    item: FetchItem,
+    newest: str,
+    *,
+    store: Store,
+    client: httpx.Client,
+    retry: RetryPolicy,
+    sleep: Callable[[float], None],
+) -> bool:
+    """Whether a watched file changed since its newest stored copy, asked by a HEAD request."""
+    response = _request(client, replace(item, method="HEAD"), dict(item.headers), retry, sleep)
+    response.raise_for_status()
+    current = response.headers.get("last-modified")
+    if not current:
+        raise ValueError("HEAD answered without Last-Modified: a replacement can't be told apart")
+    held = _last_modified(store, newest)
+    if not held:
+        return True  # the stored copy has no date to compare; a new copy will record one
+    return parsedate_to_datetime(current) != parsedate_to_datetime(held)
+
+
 def run_source(
     source: Source,
     *,
@@ -288,15 +311,28 @@ def run_source(
     healthcheck.start()
     last_cost = 0.0
     for position, item in enumerate(items):  # an index item appends to `items` as it goes
-        fetch_once = mode == "initial" or (mode == "daily" and item.once)
-        if fetch_once and item.expand is None and item.filename in index():
+        # What is stored matters to a history load and to a watched file; listing it costs a scan
+        # of the source's prefix, so no other capture reads it.
+        looks = item.expand is None and (mode == "initial" or (mode == "daily" and item.watched))
+        held = index().get(item.filename) if looks else None
+        if held and mode == "initial":
             result.skipped.append(item.filename)
             continue
         if budget is not None and result.calls_spent + max(last_cost, 1.0) > budget:
             result.stopped = f"call budget of {budget:g} reached"
             break
         previous = index().get(item.filename) if mode == "recapture" else None
+        watched = bool(held) and mode == "daily" and item.watched
         try:
+            if watched:
+                if not _replaced(
+                    item, held[-1], store=store, client=client, retry=source.retry, sleep=sleep
+                ):
+                    result.unchanged.append(item.filename)
+                    if position < len(items) - 1:
+                        sleep(source.pacing.wait_after(0))
+                    continue
+                sleep(source.pacing.wait_after(0))  # the HEAD, then the download
             fetched = fetch_item(
                 item,
                 store=store,
