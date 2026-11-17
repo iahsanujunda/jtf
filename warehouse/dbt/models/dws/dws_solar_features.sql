@@ -17,9 +17,9 @@ with clear_sky as (
     from {{ ref('dws_decision_slots') }} as s
     inner join {{ ref('dws_point_weights') }} as w
         on w.decision_time = s.decision_time
-    inner join {{ ref('dwd_sun_slots') }} as sun
+    inner join {{ ref('dim_sun_slots') }} as sun
         on sun.point = w.point and sun.slot_start = s.slot_start
-    -- dwd_sun_slots runs from 2016; a constant bound keeps its earlier partitions unread.
+    -- dim_sun_slots runs from 2016; a constant bound keeps its earlier partitions unread.
     where sun.slot_start >= timestamp('{{ var("first_target_day") }}', 'Asia/Tokyo')
     group by s.decision_time, s.slot_start
 )

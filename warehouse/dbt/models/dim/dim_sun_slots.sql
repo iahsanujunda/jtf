@@ -37,7 +37,7 @@ samples as (
 
 times as (select distinct ts from samples),
 
-points as (select point, lat, lon from {{ ref('weather_points') }}),
+points as (select point, lat, lon from {{ ref('dim_weather_points') }}),
 
 {{ sun_position('times', 'points') }},
 

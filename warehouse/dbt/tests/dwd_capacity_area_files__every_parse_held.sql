@@ -1,6 +1,6 @@
 -- The incremental model holds every capacity file at its newest parse: a file it missed, or holds
 -- at an older parse, is a row here. A full rebuild would hold them all.
-{{ config(meta={'dagster': {'ref': {'name': 'dwd_capacity_area_files'}}}) }}
+{{ config(group='capacity_figures', meta={'dagster': {'ref': {'name': 'dwd_capacity_area_files'}}}) }}
 
 with newest as (
     select path as source_file, max(ingested_at) as parsed_at

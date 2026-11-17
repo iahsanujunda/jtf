@@ -1,7 +1,7 @@
 version: 2
 
 seeds:
-  - name: weather_points
+  - name: dim_weather_points
     description: >
       The nine weather points, one per prefecture of the TEPCO area. The same points as
       `WEATHER_POINTS` in jtf/src/jtf/ingest/sources.py, which the capture uses; a pytest fails if
@@ -12,11 +12,11 @@ seeds:
       - name: point
         data_tests: [unique, not_null]
 
-  - name: sun_reference
+  - name: dim_sun_reference
     description: >
-      The sun as NREL's SPA (through pvlib) puts it, sampled as dwd_sun_slots samples it, on twelve
+      The sun as NREL's SPA (through pvlib) puts it, sampled as dim_sun_slots samples it, on twelve
       days of 2024–2026 at every point and slot. Written by scripts/write_sun_reference.py; the
-      test dwd_sun_slots__matches_spa compares the SQL against it.
+      test dim_sun_slots__matches_spa compares the SQL against it.
     config:
       column_types:
         point: string
@@ -25,7 +25,7 @@ seeds:
         elevation_end: float64
         clear_sky_ghi: float64
 
-  - name: tepco_area_parts
+  - name: dim_tepco_area_parts
     description: >
       The parts of the TEPCO area in METI's capacity tables, each named by the weather point that
       stands for it: the eight prefectures of table A, and the 20 municipalities of table B east of
@@ -44,10 +44,10 @@ seeds:
         description: The area as METI's table names it.
         data_tests: [unique, not_null]
       - name: point
-        description: The weather point of that part (seed weather_points).
+        description: The weather point of that part (seed dim_weather_points).
         data_tests:
           - not_null
           - relationships:
               arguments:
-                to: ref('weather_points')
+                to: ref('dim_weather_points')
                 field: point

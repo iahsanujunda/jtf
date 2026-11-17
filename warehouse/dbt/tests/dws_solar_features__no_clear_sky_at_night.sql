@@ -3,5 +3,5 @@
 
 select f.decision_time, f.slot_start, f.clear_sky_mw
 from {{ ref('dws_solar_features') }} as f
-inner join {{ ref('dwd_daylight') }} as d using (slot_start)
+inner join {{ ref('dim_daylight') }} as d using (slot_start)
 where d.is_night and f.clear_sky_mw != 0
