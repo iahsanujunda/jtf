@@ -37,6 +37,16 @@ def ping_recorder():
     return pings, httpx.Client(transport=httpx.MockTransport(handler))
 
 
+def test_a_daily_capture_of_unwatched_files_never_lists_what_is_stored(tmp_path):
+    class NoListing(LocalStore):
+        def list(self, prefix):
+            raise AssertionError(f"listed {prefix}")
+
+    source = get_source("tepco_area_forecast_next_day")
+    store = NoListing(tmp_path)
+    assert run_source(source, store=store, client=source_client(), now=lambda: FIXED_NOW).ok
+
+
 def test_daily_stores_file_and_sidecar_and_pings_its_slug(tmp_path):
     store = LocalStore(tmp_path)
     source = get_source("tepco_area_forecast_next_day")
@@ -314,14 +324,26 @@ FIT_INDEX = """<html><body>
 </body></html>""".encode()
 
 
-def fit_client(page: bytes = FIT_INDEX, seen: list | None = None) -> httpx.Client:
+FIT_LAST_MODIFIED = "Tue, 18 Aug 2026 04:42:27 GMT"
+
+
+def fit_client(
+    page: bytes = FIT_INDEX,
+    seen: list | None = None,
+    last_modified: dict[str, str | None] | None = None,
+) -> httpx.Client:
+    """The page, and each release file with its Last-Modified (FIT_LAST_MODIFIED unless given)."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         name = request.url.params.get("file") or request.url.path.rsplit("/", 1)[-1]
         if seen is not None:
-            seen.append(name)
+            seen.append(name if request.method == "GET" else f"{request.method} {name}")
         if name == "PublicInfoSummary":
             return httpx.Response(200, content=page)
-        return httpx.Response(200, content=f"workbook {name}".encode())
+        modified = (last_modified or {}).get(name, FIT_LAST_MODIFIED)
+        headers = {"Last-Modified": modified} if modified else {}
+        body = b"" if request.method == "HEAD" else f"workbook {name} of {modified}".encode()
+        return httpx.Response(200, content=body, headers=headers)
 
     return httpx.Client(transport=httpx.MockTransport(handler))
 
@@ -337,7 +359,7 @@ def fit_run(store, mode="daily", days_later=0, **kwargs):
     )
 
 
-def test_daily_stores_the_index_page_then_each_linked_release_once(tmp_path):
+def test_daily_stores_the_page_then_checks_each_held_release_by_its_headers(tmp_path):
     store = LocalStore(tmp_path)
     first = fit_run(store, client=fit_client())
     assert first.ok
@@ -348,14 +370,60 @@ def test_daily_stores_the_index_page_then_each_linked_release_once(tmp_path):
         "PublicInfoSummary.html",
     ]
     (a_path,) = stored_files(store, "meti_fit_capacity")["A_pref202603.xlsx"]
-    assert store.get(a_path) == b"workbook idA2603"
+    assert store.get(a_path) == f"workbook idA2603 of {FIT_LAST_MODIFIED}".encode()
 
     seen = []
     again = fit_run(store, days_later=1, client=fit_client(seen=seen))
 
-    assert again.ok and seen == ["PublicInfoSummary"]  # the page every day, a release only once
-    assert sorted(again.skipped) == ["A_pref202603.xlsx", "B_city202603.xlsx"]
+    # The page every day; a release it holds, only its headers, and nothing stored for it.
+    assert again.ok and seen == ["PublicInfoSummary", "HEAD idA2603", "HEAD idB2603"]
+    assert sorted(again.unchanged) == ["A_pref202603.xlsx", "B_city202603.xlsx"]
+    assert len(stored_files(store, "meti_fit_capacity")["A_pref202603.xlsx"]) == 1
     assert len(stored_files(store, "meti_fit_capacity")["PublicInfoSummary.html"]) == 2
+
+
+def test_a_release_replaced_in_place_is_fetched_again(tmp_path):
+    # Its link stays the same; only Last-Modified tells (notebook 04, section 6.6).
+    store = LocalStore(tmp_path)
+    assert fit_run(store, client=fit_client()).ok
+    replaced = {"idB2603": "Mon, 30 Nov 2026 02:00:00 GMT"}
+
+    seen = []
+    again = fit_run(store, days_later=1, client=fit_client(seen=seen, last_modified=replaced))
+
+    assert again.ok
+    assert seen == ["PublicInfoSummary", "HEAD idA2603", "HEAD idB2603", "idB2603"]
+    first_b, second_b = stored_files(store, "meti_fit_capacity")["B_city202603.xlsx"]
+    assert store.get(second_b) == b"workbook idB2603 of Mon, 30 Nov 2026 02:00:00 GMT"
+    assert json.loads(store.get(second_b + ".meta.json"))["load_type"] == "daily"
+    assert len(stored_files(store, "meti_fit_capacity")["A_pref202603.xlsx"]) == 1
+    assert again.unchanged == ["A_pref202603.xlsx"]
+
+
+def test_the_same_last_modified_written_differently_is_not_a_replacement(tmp_path):
+    store = LocalStore(tmp_path)
+    assert fit_run(store, client=fit_client()).ok
+    same_time = {"idA2603": "Tue, 18 Aug 2026 04:42:27 +0000", "idB2603": FIT_LAST_MODIFIED}
+
+    again = fit_run(store, days_later=1, client=fit_client(last_modified=same_time))
+
+    assert again.ok and sorted(again.unchanged) == ["A_pref202603.xlsx", "B_city202603.xlsx"]
+
+
+def test_a_held_release_answering_without_last_modified_fails_the_capture(tmp_path):
+    # It could no longer tell a replacement from none; downloading every day would hide that.
+    store = LocalStore(tmp_path)
+    assert fit_run(store, client=fit_client()).ok
+
+    seen = []
+    again = fit_run(
+        store, days_later=1, client=fit_client(seen=seen, last_modified={"idA2603": None})
+    )
+
+    assert not again.ok and "A_pref202603.xlsx" in again.failures[0]
+    assert "Last-Modified" in again.failures[0]
+    assert "idA2603" not in seen  # nothing downloaded for it
+    assert again.unchanged == ["B_city202603.xlsx"]
 
 
 def test_initial_reads_the_index_again_even_when_a_daily_capture_stored_it(tmp_path):
