@@ -1,6 +1,6 @@
 # Phase 1 progress
 
-**Updated 2026-11-17, 13:30 JST.** Where the work stands, what comes next, and what is waiting on whom. Start here when picking the work back up; update it at the end of every working session. The plan itself is in [README.md](README.md).
+**Updated 2026-11-17, 14:15 JST.** Where the work stands, what comes next, and what is waiting on whom. Start here when picking the work back up; update it at the end of every working session. The plan itself is in [README.md](README.md).
 
 ## Where things stand
 
@@ -17,11 +17,22 @@
 
 - **healthchecks.io:** `jtf-meti-fit-capacity` exists since its first ping at 08:45 on 2026-11-17: set cron `45 8 * * *`, Asia/Tokyo, 15 minutes' grace, unless already done. `jtf-tepco-demand-outlook-recapture` appears with its first ping after 09:40 on 1 December: `40 9 1 * *`, 30 minutes. `jtf-tepco-actuals-recapture` is paused (it had gone down under the default one-day period); its ping on 1 December resumes it
 
+## Due on a date
+
+Checks that wait for the calendar, most of them answering what [notebook 04](../../notebooks/04_ods_to_dwd.ipynb) leaves open (its **Still open**). An answer goes into the notebook's *made known* table, and into the plan if it changes a decision.
+
+| When | Check | Answers |
+| --- | --- | --- |
+| 2026-11-18, after 08:47 | The first chain with the fix for the race of 2026-11-17 (see the [log](#log)): one ODS run, then one run with `dwd_tepco_actuals`, `dws_decision_slots` and `dws_solar_features` together, every check green, and no failed run. The machine that runs Dagster must be awake at 08:45 to see it happen on time | The race fix, in the real chain |
+| 2026-12-01, after 09:30 | Whether the actuals re-capture added versions to `dwd_tepco_actuals`: which slots, how far the values moved, how long after the slot | How large and how late TEPCO's corrections are |
+| Early December, after two weeks of live capture | Re-fetch Single Runs for the days since capture start and match them against the 08:45 live captures: which run was current at 08:45 bounds each model's delay. If the delays allow, the weather DWS takes a fresher run than the older one captured per model and day | The real availability delay of each weather model |
+| By mid-December | The release for the end of June 2026: `basis = captured`, `known_at` at the first fetch holding both its files, and no rule-dated release moved | The first captured capacity release |
+
 ## Next, in order
 
-1. **Morning of 2026-11-18, after 08:47:** the first chain with the fix for this morning's race (see the [log](#log)): one ODS run, then one run with `dwd_tepco_actuals`, `dws_decision_slots` and `dws_solar_features` together, every check green, and no failed run. The machine that runs Dagster must be awake at 08:45 to see it happen on time
-2. **Step 5, the rest of it** ([order of work](README.md#order-of-work)), in this order:
+1. **Step 5, the rest of it** ([order of work](README.md#order-of-work)), in this order:
    - `dwd_capacity_releases` (the query of notebook 04, section 6.2: release dates from the notices and the manifest, the history rule reading only copies taken before capture start) and `dwd_capacity_area` (solar kW per release and area, read incrementally by fetch day, section 6.7), with the unit tests section 6 lists; then the capacity estimate, the trend through the newest four releases by the quarter they describe
+   - the capture of capacity re-uploads, before the next release (mid-December; see [Known issues](#known-issues)): every day a HEAD request per linked release file, its `Last-Modified` compared with the stored copy's, and a download only on change. The re-captures' conditional GET won't do here: the server ignores `If-Modified-Since` and sends the whole file (checked on 2026-11-17)
    - clear-sky output in MW and capacity in `dws_solar_features`
    - labels in their own models, outside DWS; the persistence baseline in a rolling backtest, metrics in local MLflow
    - the weather DWD models: a source per target day around capture start, a Single Run only if it covers D, Previous Runs versioned like every source; the test that every target day has weather at `T`
@@ -29,11 +40,11 @@
    - one known day checked by hand against the source files
 
    Done when the step-5 check in the plan holds (see [Where things stand](#where-things-stand))
-3. **Step 6, the time machine, on the skeleton:** replay, and the determinism, future-poison and backfill-stability tests, in a new `e2e_tests` CI job
-4. **Step 7, features and model:** notebook 06 on top of DWS through `as_of` (the label on curtailed slots, clear-sky index, capacity-weighted weather, the quality checks behind F4 and F6); each feature that earns its place becomes a DWS model; the clear-sky × ratio baseline and the TEPCO benchmark; M1 quantile models; skill above persistence on daylight slots
-5. **Step 8:** the F2 leak scenario and its write-up, then F1
-6. **The release path**, whenever a step finishes early: a `release.yml` that builds the image and points the jobs at its digest, through the `ci-release` service account and WIF (both exist from bootstrap); the `deploy` CI job (`terraform validate` and `plan`); `make bootstrap` (see [Known issues](#known-issues)); branch protection on `main`, so that changes reach prod only through a PR as the PRD says (CI already runs on pull requests and on pushes to `main`); the GitHub Actions version bumps behind the Node 20 warnings; a decision on the image size (now 1.0 GB, see [Known issues](#known-issues))
-7. **Step 4, Dagster in prod, last:** the prod BigQuery datasets and the VM's service account; the platform module (VM, Cloud SQL, IAP, NAT), the compose deployment, the `jtf-dagster` heartbeat, and a one-off backfill of the partitions recorded before the assets existed. Until then, Dagster runs locally against dev BigQuery
+2. **Step 6, the time machine, on the skeleton:** replay, and the determinism, future-poison and backfill-stability tests, in a new `e2e_tests` CI job
+3. **Step 7, features and model:** notebook 06 on top of DWS through `as_of` (the label on curtailed slots, clear-sky index, capacity-weighted weather, the quality checks behind F4 and F6); each feature that earns its place becomes a DWS model; the clear-sky × ratio baseline and the TEPCO benchmark; M1 quantile models; skill above persistence on daylight slots. On the days since capture start, the backtest also measures what serving the live forecast, about a day old, does to the error of a model trained on lead 2, about two days old (notebook 04, Still open)
+4. **Step 8:** the F2 leak scenario and its write-up, then F1
+5. **The release path**, whenever a step finishes early: a `release.yml` that builds the image and points the jobs at its digest, through the `ci-release` service account and WIF (both exist from bootstrap); the `deploy` CI job (`terraform validate` and `plan`); `make bootstrap` (see [Known issues](#known-issues)); branch protection on `main`, so that changes reach prod only through a PR as the PRD says (CI already runs on pull requests and on pushes to `main`); the GitHub Actions version bumps behind the Node 20 warnings; a decision on the image size (now 1.0 GB, see [Known issues](#known-issues))
+6. **Step 4, Dagster in prod, last:** the prod BigQuery datasets and the VM's service account; the platform module (VM, Cloud SQL, IAP, NAT), the compose deployment, the `jtf-dagster` heartbeat, and a one-off backfill of the partitions recorded before the assets existed. Until then, Dagster runs locally against dev BigQuery
 
 ## What runs where
 
@@ -94,7 +105,7 @@ Each is recorded where it applies; the list says where.
 - **The next-day forecast is published around 18:50 JST and rewritten around 21:50 with the same values** (both days so far; the file's update line says 18:50:12 and 21:50:03 for 16 November, 18:50:16 and 21:50:02 for the 17th), so each capture runs about 10 minutes behind a write. Watch whether one ever misses
 - **Cloud Scheduler can start a job twice.** At 22:00 on 2026-11-16 the scheduler made two attempts for `jtf-fetch-tepco-area-forecast-next-day`, 30 seconds apart and both answered, so the job ran twice and stored two identical files. Harmless: a capture seen again adds no version, and ODS keeps both copies by design
 - **Dagster on a laptop stops while the laptop sleeps.** On 2026-11-17 the machine suspended at 01:33 and woke at 10:12, so the 08:45 captures were parsed at 10:17 instead of 08:47. Nothing is lost: capture runs in prod, and the sensor records whatever it hasn't seen when it wakes. Keep the machine awake around 08:45, or accept the delay until step 4 puts Dagster on a VM
-- **A capacity release re-uploaded in place goes unseen.** The capture fetches each release file once, by name, and a re-upload keeps its link on the page ([notebook 04](../../notebooks/04_ods_to_dwd.ipynb), section 6.6); the table-B files of 2019–2021 were re-uploaded that way in October 2021. Fix: check each linked file's `Last-Modified` daily (a header request per file) and re-fetch on change; a re-fetched file is a new version of the release's values
+- **A capacity release re-uploaded in place goes unseen.** The capture fetches each release file once, by name, and a re-upload keeps its link on the page ([notebook 04](../../notebooks/04_ods_to_dwd.ipynb), section 6.6); the table-B files of 2019–2021 were re-uploaded that way in October 2021. What it costs is lateness, not wrong data: the copy held was public when fetched, so no feature sees anything early, and features after a correction keep the old figure. The fix (in [Next](#next-in-order)) compares each file's `Last-Modified` with the stored copy's, so its first run fetches any file changed since; a correction made before then is caught, dated at that run. Only a file replaced twice before the fix loses its middle version. The server answers a HEAD request with `Last-Modified` but ignores `If-Modified-Since` (checked on 2026-11-17). A re-fetched file is a new version of the release's values
 - **Every parse rebuilds `dwd_tepco_actuals` and DWS**, not only the actuals' parse: they read the manifest, which every parse writes (JEPX at 11:00, the next-day files at 19:00 and 22:00, capacity at 08:45). A few extra rebuilds a day, each cheap; `dwd_source_captures` narrows it
 
 ## Things learned the hard way
@@ -199,3 +210,4 @@ Local settings live in gitignored files: `.env` (`JTF_RAW_URL` is the prod raw b
 | 2026-11-17 10:12 | The machine had slept since 01:33, so the 08:45 captures waited in the bucket. On waking, the sensor recorded them and automation ran the whole chain: one ODS run of 12 assets at 10:17 (every new file parsed, capacity's first daily capture among them), then the spine and features at 10:18, which failed `dws_solar_features__d2_complete`: the spine had rebuilt after the parse's first step reported the manifest, ahead of `dwd_tepco_actuals`. The DWD rebuild at 10:18 and the features' at 10:19 healed it: target day 2026-11-18 complete, all 37 checks green |
 | 2026-11-17 10:45 | The race fixed: the manifest downstream of every ODS asset, and `rebuild_on_update` waits while an input's own inputs are being built; a test reproduces the race (96 passing) |
 | 2026-11-17 midday | The capacity probe (notebook 04, section 6): one 0.3 MB query reproduces notebook 03's dates for all 33 releases; a later copy of the page once moved a date 151 days after the fact, so the history rule reads only copies before capture start; end of June 2017 is an `.xlsx` never announced, known by the margin on 2024-02-23, so the trend orders by quarter; a re-upload keeps its link, so the capture misses it; values cost 2,085 MB a scan, so dates and values become two models. Sections 1–3 brought up to this morning's data |
+| 2026-11-17 14:15 | Notebook 04's open items given dates in [Due on a date](#due-on-a-date); TEPCO corrections, the first captured capacity release and the weather delays are checked when their data exists, the live forecast's freshness in step 7's backtest. METI's file server checked: HEAD gives `Last-Modified`, `If-Modified-Since` is ignored, which shapes the re-upload fix, now due before the next release |
