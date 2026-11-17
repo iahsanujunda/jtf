@@ -18,12 +18,17 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # The jtf job lints every notebook, and its tests load the dbt project into Dagster,
+          # so a change to either runs it too.
           filters: |
             jtf:
               - 'jtf/**'
+              - 'notebooks/**'
+              - 'warehouse/dbt/**'
               - 'pyproject.toml'
               - 'uv.lock'
               - 'Dockerfile'
+              - '.github/workflows/ci.yml'
 
   jtf:
     needs: changes
