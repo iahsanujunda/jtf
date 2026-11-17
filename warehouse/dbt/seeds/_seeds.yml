@@ -24,3 +24,30 @@ seeds:
         elevation_start: float64
         elevation_end: float64
         clear_sky_ghi: float64
+
+  - name: tepco_area_parts
+    description: >
+      The parts of the TEPCO area in METI's capacity tables, each named by the weather point that
+      stands for it: the eight prefectures of table A, and the 20 municipalities of table B east of
+      the Fuji River, which make up the area's part of Shizuoka (numazu). Fuji and Fujinomiya, which
+      the river runs through, count in full (notebooks/03_solar_capacity.ipynb, section 5).
+    config:
+      column_types: {meti_table: string, meti_area: string, point: string}
+    columns:
+      - name: meti_table
+        description: "`pref` (table A) or `city` (table B)."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [pref, city]
+      - name: meti_area
+        description: The area as METI's table names it.
+        data_tests: [unique, not_null]
+      - name: point
+        description: The weather point of that part (seed weather_points).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('weather_points')
+                field: point

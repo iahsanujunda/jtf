@@ -21,3 +21,12 @@ sources:
           page showed it: the month-end the release describes (`ref_date`) and the date given
           (`announced`). Copies archived by the Wayback Machine carry the archive's time as
           `source_time`; our own captures have none.
+      - name: meti_fit_capacity_pref
+        description: >
+          Table A of each FIT/FIP release, by prefecture: one row per sheet, area and header path,
+          the value as found (kW for capacity, a count otherwise). Partitioned by `extraction_date`,
+          clustered by `source_file`.
+      - name: meti_fit_capacity_city
+        description: >
+          Table B of each release, by municipality (`area` as 静岡県沼津市), laid out as table A.
+          About 2 GB: read only through dwd_capacity_area_files, incrementally.
