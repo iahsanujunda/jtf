@@ -1,10 +1,10 @@
 -- Every file holds every part of its table, each from all of its METI areas: a prefecture or a
 -- municipality renamed in a release would otherwise drop out of the sum without a trace.
-{{ config(meta={'dagster': {'ref': {'name': 'dwd_capacity_area_files'}}}) }}
+{{ config(group='capacity_figures', meta={'dagster': {'ref': {'name': 'dwd_capacity_area_files'}}}) }}
 
 with parts as (
     select meti_table, point, count(*) as meti_areas
-    from {{ ref('tepco_area_parts') }}
+    from {{ ref('dim_tepco_area_parts') }}
     group by meti_table, point
 ),
 

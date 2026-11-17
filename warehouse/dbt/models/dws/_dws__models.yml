@@ -18,7 +18,7 @@ models:
           # The sun's table covers a fixed range: this fails once decision slots run past it.
           - relationships:
               arguments:
-                to: ref('dwd_daylight')
+                to: ref('dim_daylight')
                 field: slot_start
 
   - name: dws_solar_features
@@ -109,7 +109,7 @@ models:
           - not_null
           - relationships:
               arguments:
-                to: ref('weather_points')
+                to: ref('dim_weather_points')
                 field: point
       - name: ref_date
         description: The quarter of the release the weights come from.
@@ -143,7 +143,7 @@ unit_tests:
         rows: []
       - input: ref('dws_point_weights')
         rows: []
-      - input: ref('dwd_sun_slots')
+      - input: ref('dim_sun_slots')
         rows: []
     expect:
       rows:
@@ -248,7 +248,7 @@ unit_tests:
         rows:
           - {decision_time: "2026-11-16 00:00:00+00", point: mito, weight: 0.75}
           - {decision_time: "2026-11-16 00:00:00+00", point: numazu, weight: 0.25}
-      - input: ref('dwd_sun_slots')
+      - input: ref('dim_sun_slots')
         rows:
           - {point: mito, slot_start: "2026-11-17 03:00:00+00", clear_sky_ghi: 800}
           - {point: numazu, slot_start: "2026-11-17 03:00:00+00", clear_sky_ghi: 400}

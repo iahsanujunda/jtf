@@ -1,5 +1,5 @@
 # Values come from the environment (names in deploy/contract/settings.example.env), never git.
-# Each layer is its own dataset, named <prefix>_<layer>: dev_dwd, pr_123_dws and so on.
+# Each layer is its own dataset, named <prefix>_<layer>: dev_dim, dev_dwd, pr_123_dws and so on.
 jtf:
   target: dev
   outputs:

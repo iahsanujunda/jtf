@@ -120,7 +120,7 @@ def test_models_rebuild_on_their_own_and_seeds_only_by_hand():
     nodes = json.loads(DBT_PROJECT.manifest_path.read_text())["nodes"].values()
     seeds = {n["name"] for n in nodes if n["resource_type"] == "seed"}
     for spec in dbt_models.specs:
-        assert spec.key.path[0] == spec.group_name in {"dwd", "dws"}, spec.key
+        assert spec.key.path[0] == spec.group_name in {"dim", "dwd", "dws"}, spec.key
         expected = None if spec.key.path[-1] in seeds else REBUILD_ON_UPDATE
         assert spec.automation_condition == expected, spec.key
 

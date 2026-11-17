@@ -5,6 +5,7 @@ dbt-bigquery project, one dataset per layer. Dagster loads the models as assets 
 | Layer | Holds | Phase |
 | --- | --- | --- |
 | [ODS](models/ods/) | Parsed rows from raw files, append-only | 1 |
+| [DIM](models/dim/) | What nothing is learned about over time: the sun per point and slot, daylight, and the seeds | 1 |
 | [DWD](models/dwd/) | Typed detail in MW and JST slot start, every version kept | 1 |
 | [DWS](models/dws/) | Features per decision time and slot, for every decision time | 1 |
 | [ADS](models/ads/) | Published forecasts, input snapshots, replay outputs | 1 (replays), 2 (daily) |
@@ -12,7 +13,7 @@ dbt-bigquery project, one dataset per layer. Dagster loads the models as assets 
 
 Targets: `dev` (datasets named `<prefix>_<layer>` in the dev project, the prefix from `JTF_DBT_DATASET_PREFIX`), `ci` (a throwaway prefix per PR), `prod` (written only by CI). Settings come from the environment, through [profiles.yml](profiles.yml); locally, `make dbt` reads them from `.env` and runs `dbt build`, and `make dbt ARGS="test --select dwd_tepco_actuals"` runs anything else.
 
-Rules: DWS reads versioned DWD models only through the as-of macro in [macros/](macros/) and never reads ODS; models tagged `timeless` are read directly; no `CURRENT_DATE()` or `NOW()` anywhere. CI enforces them with the checks in [rules/](rules/).
+Rules: no layer reads one above it, and only DWD reads ODS; DWS reads versioned DWD models only through the as-of macro in [macros/](macros/), and DIM directly; no `CURRENT_DATE()` or `NOW()` anywhere. The checks in [rules/](rules/) enforce them, as they are built: the layers' reads now, with pytest.
 
 ## Tests
 

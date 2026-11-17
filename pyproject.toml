@@ -28,4 +28,4 @@ src = ["jtf/src", "jtf/tests"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-testpaths = ["jtf/tests"]
+testpaths = ["jtf/tests", "warehouse/dbt/rules"]

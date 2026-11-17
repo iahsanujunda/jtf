@@ -35,7 +35,7 @@ REBUILD_ON_UPDATE = (
 
 
 class Translator(DagsterDbtTranslator):
-    """Groups by layer (`dwd`, `dws`); models rebuild by themselves, seeds only by hand."""
+    """Groups by layer (`dim`, `dwd`, `dws`); models rebuild by themselves, seeds only by hand."""
 
     def get_asset_spec(self, manifest, unique_id, project):
         spec = super().get_asset_spec(manifest, unique_id, project)

@@ -1,5 +1,15 @@
 version: 2
 
+# A model private to a group can be read only by the models and tests of that group: dbt refuses
+# any other ref when it parses the project.
+groups:
+  - name: capacity_figures
+    owner:
+      name: warehouse
+    description: >
+      The capacity figures per raw file, which have no known_at, and the versions made from them.
+      Only the versions are read outside the group, through as_of.
+
 models:
   - name: dwd_tepco_actuals
     description: >
@@ -53,53 +63,6 @@ models:
       - expression_is_true:
           arguments:
             expression: value_mw is null or value_mw >= 0
-
-  - name: dwd_sun_slots
-    description: >
-      The sun at each weather point per slot, from 2016-04 to 2030: its geometric height at the
-      slot's edges and Haurwitz clear-sky radiation, the mean of six samples. Computed from time
-      and place alone, so it has no known_at and needs no as_of.
-    data_tests:
-      - unique_combination:
-          arguments:
-            columns: [point, slot_start]
-      - expression_is_true:
-          arguments:
-            expression: clear_sky_ghi >= 0
-      # The sun below the horizon at both edges of a slot at a point: no clear sky there.
-      - expression_is_true:
-          arguments:
-            expression: elevation_start >= 0 or elevation_end >= 0 or clear_sky_ghi = 0
-    columns:
-      - name: point
-        data_tests: [not_null]
-      - name: slot_start
-        data_tests: [not_null]
-      - name: elevation_start
-        description: The sun's geometric height at the slot's start, degrees.
-        data_tests: [not_null]
-      - name: elevation_end
-        description: The same at the slot's end.
-        data_tests: [not_null]
-      - name: clear_sky_ghi
-        description: Haurwitz clear-sky radiation on the ground, W/m², the mean of six samples.
-        data_tests: [not_null]
-
-  - name: dwd_daylight
-    description: >
-      Night and daylight per slot for the whole area: night when the sun is below 0° at both
-      edges of the slot at all nine points. Daylight, every other slot, is the metrics' filter.
-    data_tests:
-      - expression_is_true:
-          arguments:
-            expression: points = 9
-    columns:
-      - name: slot_start
-        data_tests: [unique, not_null]
-      - name: highest_edge
-        description: The highest the sun stands at either edge of the slot at any point, degrees.
-      - name: is_night
-        data_tests: [not_null]
 
   - name: dwd_capacity_releases
     description: >
@@ -163,6 +126,7 @@ models:
             expression: ref_date = last_day(ref_date) and extract(month from ref_date) in (3, 6, 9, 12)
 
   - name: dwd_capacity_area_files
+    config: {group: capacity_figures, access: private}
     description: >
       Installed solar per raw capacity file and part of the TEPCO area, in MW: new and transferred
       installations, under and over 10 kW, each file as last parsed. Incremental: a run reads only
@@ -173,7 +137,7 @@ models:
         description: The raw file, as the manifest's `path`.
         data_tests: [not_null]
       - name: point
-        description: The weather point of the part (seed tepco_area_parts).
+        description: The weather point of the part (seed dim_tepco_area_parts).
         data_tests: [not_null]
       - name: ref_date
         data_tests: [not_null]
@@ -202,6 +166,7 @@ models:
             expression: solar_mw > 0
 
   - name: dwd_capacity_area
+    config: {group: capacity_figures}
     description: >
       Installed solar per capacity release and part of the TEPCO area, in MW, as versions. Read for
       a decision time only through `as_of`. A release's first version is known when the release is;
@@ -211,7 +176,7 @@ models:
         description: The quarter's last day, the date the figures describe.
         data_tests: [not_null]
       - name: point
-        description: The weather point of the part (seed tepco_area_parts).
+        description: The weather point of the part (seed dim_tepco_area_parts).
         data_tests: [not_null]
       - name: solar_mw
         data_tests: [not_null]
@@ -505,7 +470,7 @@ unit_tests:
           - {source_file: fB, ref_date: "2026-03-31", sheet: 表B②－１, area: 静岡県沼津市, path: 太陽光発電設備/10kW未満, value: 50, fetched_at: "2026-11-16 00:43:00+00", ingested_at: "2026-11-16 01:00:00+00"}
           - {source_file: fB, ref_date: "2026-03-31", sheet: 表B②－２, area: 静岡県富士市, path: 太陽光発電設備/10kW以上, value: 5, fetched_at: "2026-11-16 00:43:00+00", ingested_at: "2026-11-16 01:00:00+00"}
           - {source_file: fB, ref_date: "2026-03-31", sheet: 表B②－１, area: 静岡県静岡市, path: 太陽光発電設備/10kW未満, value: 1000, fetched_at: "2026-11-16 00:43:00+00", ingested_at: "2026-11-16 01:00:00+00"}
-      - input: ref('tepco_area_parts')
+      - input: ref('dim_tepco_area_parts')
         rows:
           - {meti_table: pref, meti_area: 茨城県, point: mito}
           - {meti_table: city, meti_area: 静岡県沼津市, point: numazu}
@@ -550,7 +515,7 @@ unit_tests:
       - input: source('ods', 'meti_fit_capacity_city')
         rows:
           - {source_file: fB, ref_date: "2026-06-30", sheet: 表B②－１, area: 静岡県沼津市, path: 太陽光発電設備/10kW未満, value: 50, fetched_at: "2026-11-30 23:45:00+00", ingested_at: "2026-12-01 00:00:00+00"}
-      - input: ref('tepco_area_parts')
+      - input: ref('dim_tepco_area_parts')
         rows:
           - {meti_table: pref, meti_area: 茨城県, point: mito}
           - {meti_table: city, meti_area: 静岡県沼津市, point: numazu}

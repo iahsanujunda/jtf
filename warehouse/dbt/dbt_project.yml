@@ -21,13 +21,17 @@ vars:
   sun_first_day: "2016-04-01"
   sun_last_day: "2030-12-31"
 
+# Seeds are reference data, so they sit with the dimensions.
 seeds:
   jtf:
-    +schema: dwd
+    +schema: dim
 
 models:
   jtf:
     # ODS is not built by dbt: the jtf parsers load it, and dbt reads it as sources.
+    dim:
+      +schema: dim
+      +materialized: table
     dwd:
       +schema: dwd
       +materialized: table

@@ -11,5 +11,5 @@ select
     max(greatest(elevation_start, elevation_end)) as highest_edge,
     max(greatest(elevation_start, elevation_end)) < 0 as is_night,
     count(*) as points
-from {{ ref('dwd_sun_slots') }}
+from {{ ref('dim_sun_slots') }}
 group by slot_start

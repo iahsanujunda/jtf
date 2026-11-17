@@ -1,14 +1,14 @@
 {#
   Installed solar in each part of the TEPCO area, per raw capacity file as last parsed: new and
-  transferred installations, under and over 10 kW, in MW (METI's kW ÷ 1,000). A part is named by its weather point:
-  its prefecture from table A, or Shizuoka east of the Fuji River (numazu) from table B
-  (seed tepco_area_parts). The only model that reads the 2 GB of capacity figures, so it is
-  incremental: each run reads only the files whose newest parse it doesn't hold, which covers new
-  files, re-parses under a new parser version, and parses that finished out of order. Versions
-  and known_at are dwd_capacity_area's. A change to its columns needs one build with
-  --full-refresh; until then its runs fail (on_schema_change: fail) rather than merge rows of two
-  shapes. Designed in notebooks/04_ods_to_dwd.ipynb, sections 6.7
-  and 6.8.
+  transferred installations, under and over 10 kW, in MW (METI's kW ÷ 1,000). A part is named by
+  its weather point: its prefecture from table A, or Shizuoka east of the Fuji River (numazu) from
+  table B (seed dim_tepco_area_parts). The only model that reads the 2 GB of capacity figures, so
+  it is incremental: each run reads only the files whose newest parse it doesn't hold, which covers
+  new files, re-parses under a new parser version, and parses that finished out of order. Versions
+  and known_at are dwd_capacity_area's, and only it can read this model (private to the group
+  capacity_figures). A change to its columns needs one build with --full-refresh; until then its
+  runs fail (on_schema_change: fail) rather than merge rows of two shapes. Designed in
+  notebooks/04_ods_to_dwd.ipynb, sections 6.7 and 6.8.
 #}
 {{ config(
     materialized='incremental',
@@ -74,7 +74,7 @@ select
     -- give figures a few 1e-10 kW apart, and dwd_capacity_area would see a correction.
     cast(sum(cast(f.value as numeric)) / 1000 as float64) as solar_mw
 from latest_parse as f
-inner join {{ ref('tepco_area_parts') }} as p
+inner join {{ ref('dim_tepco_area_parts') }} as p
     on p.meti_table = f.meti_table and p.meti_area = f.area
 inner join files using (source_file)
 group by f.source_file, p.point

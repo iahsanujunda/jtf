@@ -11,4 +11,4 @@ with current_figures as (
 select r.ref_date, c.parts
 from {{ ref('dwd_capacity_releases') }} as r
 left join current_figures as c using (ref_date)
-where coalesce(c.parts, 0) != (select count(distinct point) from {{ ref('tepco_area_parts') }})
+where coalesce(c.parts, 0) != (select count(distinct point) from {{ ref('dim_tepco_area_parts') }})

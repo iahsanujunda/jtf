@@ -1,5 +1,5 @@
-"""Write seeds/sun_reference.csv: the sun as NREL's SPA (through pvlib) puts it, sampled exactly as
-dwd_sun_slots samples it, for a data test to compare the SQL against within a tolerance.
+"""Write seeds/dim_sun_reference.csv: the sun as NREL's SPA (through pvlib) puts it, sampled
+exactly as dim_sun_slots samples it, for a data test to compare the SQL against within a tolerance.
 
 Run from the repository root after changing the points or the sampling:
 
@@ -20,7 +20,7 @@ DAYS = [
     "2026-01-01", "2026-04-15", "2026-07-30", "2026-10-31",
 ]  # fmt: skip
 SAMPLES_S = [150, 450, 750, 1050, 1350, 1650]  # the 5-minute middles of a slot, seconds in
-OUT = Path(__file__).resolve().parents[1] / "seeds" / "sun_reference.csv"
+OUT = Path(__file__).resolve().parents[1] / "seeds" / "dim_sun_reference.csv"
 
 
 def slot_starts() -> pd.DatetimeIndex:

@@ -184,7 +184,7 @@ def test_fit_history_adds_every_archived_copy_of_the_page():
 
 def test_the_warehouse_seed_holds_the_same_weather_points():
     # dbt computes the sun at these points; the capture fetches weather at them. One definition.
-    seed = Path(__file__).parents[2] / "warehouse" / "dbt" / "seeds" / "weather_points.csv"
+    seed = Path(__file__).parents[2] / "warehouse/dbt/seeds/dim_weather_points.csv"
     with seed.open() as f:
         rows = [(r["point"], float(r["lat"]), float(r["lon"])) for r in csv.DictReader(f)]
     assert rows == list(WEATHER_POINTS)
