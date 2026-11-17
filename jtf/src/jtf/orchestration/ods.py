@@ -20,12 +20,6 @@ FILE_CHECKS = "files_pass_checks"
 # Every ODS asset writes the manifest, so no single asset owns it. Each parse that writes it reports
 # a materialization, so that models reading it (capture start, the decision-time spine) rebuild.
 MANIFEST_KEY = dg.AssetKey(["ods", MANIFEST])
-MANIFEST_SPEC = dg.AssetSpec(
-    MANIFEST_KEY,
-    group_name="ods",
-    kinds={"bigquery"},
-    description="The manifest: one row per raw file and ODS table, written by every ODS parse",
-)
 
 
 def ods_key(parser: Parser) -> dg.AssetKey:
@@ -118,3 +112,13 @@ ORCHESTRATED = (
     "meti_fit_notices",
 )
 ODS_ASSETS = [ods_asset(PARSERS[table]) for table in ORCHESTRATED]
+
+# Downstream of every ODS asset, since they write it: a model that reads the manifest can then tell
+# that a parse is still running, and wait for its last step rather than rebuild after its first.
+MANIFEST_SPEC = dg.AssetSpec(
+    MANIFEST_KEY,
+    deps=[a.key for a in ODS_ASSETS],
+    group_name="ods",
+    kinds={"bigquery"},
+    description="The manifest: one row per raw file and ODS table, written by every ODS parse",
+)
