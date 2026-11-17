@@ -1,0 +1,90 @@
+version: 2
+
+models:
+  - name: ads_label_solar
+    description: >
+      The truth of each slot from February 2024: TEPCO's actuals at their latest version, never
+      read through as_of. label_mw is delivered plus curtailed, what the weather allowed.
+    columns:
+      - name: slot_start
+        data_tests: [unique, not_null]
+      - name: label_mw
+        description: Solar the weather allowed in MW, averaged over the slot. The forecast target.
+      - name: delivered_mw
+        description: Solar delivered to the grid, in MW.
+      - name: curtailed_mw
+        description: Solar curtailed by output control, in MW.
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: label_mw >= delivered_mw and curtailed_mw >= 0
+
+  - name: ads_outcome_solar
+    description: >
+      Each prediction met by its label: one row per prediction, with its error in MW and as a
+      share of the capacity estimated at its decision time, and whether its slot is daylight.
+      Backtest metrics aggregate it.
+    columns:
+      - name: error_mw
+        description: Predicted minus label, MW. Positive means the forecast was too high.
+      - name: error_share
+        description: error_mw over capacity_mw, the capacity estimated at the decision time.
+      - name: is_daylight
+        description: Not night by dim_daylight. Metrics count daylight slots only.
+        data_tests: [not_null]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [run_id, model, decision_time, slot_start]
+
+unit_tests:
+  # Times are UTC; JST is UTC+9. Slot 12:00 JST on 2026-11-14 is 03:00 UTC.
+
+  - name: a_label_is_delivered_plus_curtailed_at_their_latest_versions
+    description: >
+      Slot 12:00: delivered was corrected from 5,000 to 5,200 and 300 MW were curtailed, so the
+      label is 5,500. Slot 12:30: nothing curtailed. Wind never counts.
+    model: ads_label_solar
+    given:
+      - input: ref('dwd_tepco_actuals')
+        rows:
+          - {slot_start: "2026-11-14 03:00:00+00", measure: solar, value_mw: 5000, known_at: "2026-11-14 05:00:00+00", known_until: "2026-12-01 00:30:00+00"}
+          - {slot_start: "2026-11-14 03:00:00+00", measure: solar, value_mw: 5200, known_at: "2026-12-01 00:30:00+00", known_until: null}
+          - {slot_start: "2026-11-14 03:00:00+00", measure: solar_curtailed, value_mw: 300, known_at: "2026-11-14 05:00:00+00", known_until: null}
+          - {slot_start: "2026-11-14 03:00:00+00", measure: wind, value_mw: 100, known_at: "2026-11-14 05:00:00+00", known_until: null}
+          - {slot_start: "2026-11-14 03:30:00+00", measure: solar, value_mw: 6000, known_at: "2026-11-14 05:30:00+00", known_until: null}
+          - {slot_start: "2026-11-14 03:30:00+00", measure: solar_curtailed, value_mw: 0, known_at: "2026-11-14 05:30:00+00", known_until: null}
+    expect:
+      rows:
+        - {slot_start: "2026-11-14 03:00:00+00", label_mw: 5500, delivered_mw: 5200, curtailed_mw: 300}
+        - {slot_start: "2026-11-14 03:30:00+00", label_mw: 6000, delivered_mw: 6000, curtailed_mw: 0}
+
+  - name: an_outcome_is_the_prediction_less_its_label_over_capacity_at_t
+    description: >
+      T is 09:00 JST on 2026-11-13. Slot 12:00 on D: 6,000 predicted against a label of 5,500,
+      an error of +500 MW, 0.025 of 20,000 MW. Slot 00:00 on D is night. Slot 12:30 has no actual
+      yet: its row stays, with no label and no error.
+    model: ads_outcome_solar
+    given:
+      - input: source('ads', 'ads_prediction_solar')
+        rows:
+          - {run_id: r1, model: persistence_d2, mode: backtest, fold: "2026-11-01", decision_time: "2026-11-13 00:00:00+00", target_day: "2026-11-14", slot_start: "2026-11-14 03:00:00+00", predicted_mw: 6000}
+          - {run_id: r1, model: persistence_d2, mode: backtest, fold: "2026-11-01", decision_time: "2026-11-13 00:00:00+00", target_day: "2026-11-14", slot_start: "2026-11-13 15:00:00+00", predicted_mw: 0}
+          - {run_id: r1, model: persistence_d2, mode: backtest, fold: "2026-11-01", decision_time: "2026-11-13 00:00:00+00", target_day: "2026-11-14", slot_start: "2026-11-14 03:30:00+00", predicted_mw: 6100}
+      - input: ref('ads_label_solar')
+        rows:
+          - {slot_start: "2026-11-14 03:00:00+00", label_mw: 5500}
+          - {slot_start: "2026-11-13 15:00:00+00", label_mw: 0}
+      - input: ref('dws_capacity')
+        rows:
+          - {decision_time: "2026-11-13 00:00:00+00", capacity_mw: 20000}
+      - input: ref('dim_daylight')
+        rows:
+          - {slot_start: "2026-11-14 03:00:00+00", is_night: false}
+          - {slot_start: "2026-11-13 15:00:00+00", is_night: true}
+          - {slot_start: "2026-11-14 03:30:00+00", is_night: false}
+    expect:
+      rows:
+        - {slot_start: "2026-11-14 03:00:00+00", label_mw: 5500, error_mw: 500, error_share: 0.025, is_daylight: true}
+        - {slot_start: "2026-11-13 15:00:00+00", label_mw: 0, error_mw: 0, error_share: 0, is_daylight: false}
+        - {slot_start: "2026-11-14 03:30:00+00", label_mw: null, error_mw: null, error_share: null, is_daylight: true}

@@ -20,10 +20,11 @@ test:
 image:
 	docker build -t $(IMAGE) .
 
-# Dagster on the laptop: UI on http://localhost:3000, state kept in .dagster/, settings from .env
+# Dagster on the laptop: UI on http://localhost:3000, state kept in .dagster/, settings from .env;
+# with MLflow (the group ml) for the backtest
 dagster:
 	mkdir -p .dagster
-	DAGSTER_HOME=$(CURDIR)/.dagster uv run dagster dev -m jtf.orchestration.definitions
+	DAGSTER_HOME=$(CURDIR)/.dagster uv run --group ml dagster dev -m jtf.orchestration.definitions
 
 # dbt against dev BigQuery with the settings in .env, e.g. make dbt ARGS="build --select dwd"
 dbt:

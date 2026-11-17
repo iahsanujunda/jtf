@@ -1,0 +1,24 @@
+version: 2
+
+# Written by Python, not dbt: a model run appends its predictions here (jtf/src/jtf/ml). In the
+# ADS dataset with dbt's own models, since it is output too; named ads/<table> as in Dagster, so
+# lineage runs from the features through the run to its outcome and metrics.
+sources:
+  - name: ads
+    schema: "{{ target.schema }}_ads"
+    tables:
+      - name: ads_prediction_solar
+        description: >
+          What a model said: one row per run, model, decision time and slot. Backtests write
+          mode `backtest`, every row tagged with its run, so runs never overwrite each other.
+        columns:
+          - name: run_id
+            description: The Dagster run that wrote it.
+          - name: model
+            description: "`persistence_d2` for now."
+          - name: mode
+            description: "`backtest` for now; `forecast` and `replay` come with phase 2 and step 6."
+          - name: fold
+            description: The first day of the target day's month, the backtest's test month.
+          - name: predicted_mw
+            description: The point forecast in MW, averaged over the slot.

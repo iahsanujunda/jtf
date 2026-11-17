@@ -7,6 +7,7 @@ from jtf.ingest.landed import SIDECAR
 from jtf.ingest.sources import SOURCES
 from jtf.orchestration.dbt import DBT_PROJECT, REBUILD_ON_UPDATE, dbt_models
 from jtf.orchestration.definitions import defs
+from jtf.orchestration.ml import OUTCOMES, PREDICTIONS, solar_backtest_metrics, solar_predictions
 from jtf.orchestration.ods import FILE_CHECKS, MANIFEST_KEY, MANIFEST_SPEC, ODS_ASSETS, ods_key
 from jtf.orchestration.raw import RAW_ASSETS, raw_bucket_sensor, raw_key
 from jtf.orchestration.resources import BigQuery, RawBucket
@@ -110,17 +111,30 @@ def test_automation_runs_by_default():
     assert sensor.default_status == dg.DefaultSensorStatus.RUNNING
 
 
-def test_dbt_reads_only_ods_assets_so_lineage_runs_from_raw_files():
+def test_dbt_reads_only_assets_made_here_so_lineage_runs_from_raw_files():
+    # ODS and its manifest, parsed from raw files, and the predictions a model run writes.
     produced = set(dbt_models.keys)
     read = {dep.asset_key for spec in dbt_models.specs for dep in spec.deps} - produced
-    assert read <= {a.key for a in ODS_ASSETS} | {MANIFEST_KEY}
+    assert read <= {a.key for a in ODS_ASSETS} | {MANIFEST_KEY, PREDICTIONS}
+
+
+def test_the_backtest_runs_from_the_features_through_dbt_to_its_metrics_by_hand():
+    specs = {spec.key: spec for spec in dbt_models.specs}
+    predictions = solar_predictions.specs_by_key[PREDICTIONS]
+    assert dg.AssetKey(["dws", "dws_solar_features"]) in {d.asset_key for d in predictions.deps}
+    assert PREDICTIONS in {d.asset_key for d in specs[OUTCOMES].deps}
+    metrics = next(iter(solar_backtest_metrics.specs))
+    assert {d.asset_key for d in metrics.deps} == {OUTCOMES}
+    # A backtest is a deliberate run: neither Python asset starts by itself.
+    assert predictions.automation_condition is None
+    assert metrics.automation_condition is None
 
 
 def test_models_rebuild_on_their_own_and_seeds_only_by_hand():
     nodes = json.loads(DBT_PROJECT.manifest_path.read_text())["nodes"].values()
     seeds = {n["name"] for n in nodes if n["resource_type"] == "seed"}
     for spec in dbt_models.specs:
-        assert spec.key.path[0] == spec.group_name in {"dim", "dwd", "dws"}, spec.key
+        assert spec.key.path[0] == spec.group_name in {"dim", "dwd", "dws", "ads"}, spec.key
         expected = None if spec.key.path[-1] in seeds else REBUILD_ON_UPDATE
         assert spec.automation_condition == expected, spec.key
 
