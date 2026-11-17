@@ -117,6 +117,43 @@ models:
       - name: weight
         data_tests: [not_null]
 
+  - name: dws_weather
+    description: >
+      The weather known at T for every slot of its target day, per point and model, from one
+      source per target day (the live capture, else lead 2, else the newest Single Run known
+      strictly before T), each hole filled from another model of that source. Read DWD only through
+      as_of.
+    columns:
+      - name: source
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [live, previous_runs, single_runs]
+      - name: point
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_weather_points')
+                field: point
+      - name: model
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_weather_models')
+                field: model
+      - name: ghi_w_m2_model
+        description: >
+          The model the radiation came from: the row's own, or the one that filled its hole. The
+          same for every variable (`<variable>_model`).
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [decision_time, slot_start, point, model]
+      - expression_is_true:
+          arguments:
+            expression: (ghi_w_m2 is null) = (ghi_w_m2_model is null) and (temperature_c is null) = (temperature_c_model is null)
+
 unit_tests:
   # T is 09:00 JST on 2026-11-16 (00:00 UTC); its target day is 2026-11-17, D−2 is 2026-11-15.
   - name: as_of_sees_only_what_was_known_at_t
@@ -258,3 +295,153 @@ unit_tests:
       rows:
         - {slot_start: "2026-11-17 03:00:00+00", capacity_mw: 20000, clear_sky_mw: 14000}
         - {slot_start: "2026-11-16 15:00:00+00", capacity_mw: 20000, clear_sky_mw: 0}
+
+  # Weather. Times are UTC: T is 00:00 on D−1 (09:00 JST). One point, three models (GSM has no
+  # radiation), one daylight slot (12:00 JST) and one night slot (00:00 JST) on D.
+
+  - name: the_live_capture_comes_first_and_only_if_known_at_t
+    description: >
+      D is 18 November. The capture of 08:45 JST on the 17th serves it. Lead 2 for D also exists,
+      as a later top-up would add it, dated by its rule before T: it must not displace the capture,
+      or a backfill would change what a past forecast saw. A capture fetched after T is not used.
+    model: dws_weather
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-17 00:00:00+00", target_day: "2026-11-18", slot_start: "2026-11-17 15:00:00+00"}
+          - {decision_time: "2026-11-17 00:00:00+00", target_day: "2026-11-18", slot_start: "2026-11-18 03:00:00+00"}
+      - input: ref('dim_daylight')
+        rows:
+          - {slot_start: "2026-11-18 03:00:00+00", is_night: false}
+          - {slot_start: "2026-11-17 15:00:00+00", is_night: true}
+      - input: ref('dim_weather_points')
+        rows:
+          - {point: tokyo}
+      - input: ref('dim_weather_models')
+        rows:
+          - {model: jma_msm, has_radiation: true, fill_order: 1, delay_hours: 3}
+          - {model: ecmwf_ifs025, has_radiation: true, fill_order: 2, delay_hours: 6}
+          - {model: jma_gsm, has_radiation: false, fill_order: 3, delay_hours: 6}
+      - input: ref('dwd_weather_slots')
+        rows:
+          - {source: live, point: tokyo, model: jma_msm, lead_days: null, run_time: null, captured_at: "2026-11-16 23:45:00+00", slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: 500, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 15, wind_speed_kmh: 10, known_at: "2026-11-16 23:45:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: jma_msm, lead_days: null, run_time: null, captured_at: "2026-11-17 02:00:00+00", slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: 900, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 25, wind_speed_kmh: 10, known_at: "2026-11-17 02:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: jma_msm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: 300, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-15 18:00:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: jma_msm, lead_days: null, run_time: null, captured_at: "2026-11-16 23:45:00+00", slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: 500, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 15, wind_speed_kmh: 10, known_at: "2026-11-16 23:45:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: jma_msm, lead_days: null, run_time: null, captured_at: "2026-11-17 02:00:00+00", slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: 900, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 25, wind_speed_kmh: 10, known_at: "2026-11-17 02:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: jma_msm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: 300, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-15 18:00:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: null, captured_at: "2026-11-16 23:45:00+00", slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: 500, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 15, wind_speed_kmh: 10, known_at: "2026-11-16 23:45:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: null, captured_at: "2026-11-17 02:00:00+00", slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: 900, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 25, wind_speed_kmh: 10, known_at: "2026-11-17 02:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: ecmwf_ifs025, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: 300, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-15 18:00:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: null, captured_at: "2026-11-16 23:45:00+00", slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: 500, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 15, wind_speed_kmh: 10, known_at: "2026-11-16 23:45:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: null, captured_at: "2026-11-17 02:00:00+00", slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: 900, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 25, wind_speed_kmh: 10, known_at: "2026-11-17 02:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: ecmwf_ifs025, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: 300, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-15 18:00:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: jma_gsm, lead_days: null, run_time: null, captured_at: "2026-11-16 23:45:00+00", slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 15, wind_speed_kmh: 10, known_at: "2026-11-16 23:45:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: jma_gsm, lead_days: null, run_time: null, captured_at: "2026-11-17 02:00:00+00", slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 25, wind_speed_kmh: 10, known_at: "2026-11-17 02:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: jma_gsm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-18 03:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-15 18:00:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: jma_gsm, lead_days: null, run_time: null, captured_at: "2026-11-16 23:45:00+00", slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 15, wind_speed_kmh: 10, known_at: "2026-11-16 23:45:00+00", known_until: null, basis: rule}
+          - {source: live, point: tokyo, model: jma_gsm, lead_days: null, run_time: null, captured_at: "2026-11-17 02:00:00+00", slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 25, wind_speed_kmh: 10, known_at: "2026-11-17 02:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: jma_gsm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-17 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-15 18:00:00+00", known_until: null, basis: rule}
+    expect:
+      rows:
+        - {slot_start: "2026-11-18 03:00:00+00", model: jma_msm, source: live, captured_at: "2026-11-16 23:45:00+00", ghi_w_m2: 500, temperature_c: 15}
+        - {slot_start: "2026-11-17 15:00:00+00", model: jma_msm, source: live, captured_at: "2026-11-16 23:45:00+00", ghi_w_m2: 500, temperature_c: 15}
+        - {slot_start: "2026-11-18 03:00:00+00", model: ecmwf_ifs025, source: live, captured_at: "2026-11-16 23:45:00+00", ghi_w_m2: 500, temperature_c: 15}
+        - {slot_start: "2026-11-17 15:00:00+00", model: ecmwf_ifs025, source: live, captured_at: "2026-11-16 23:45:00+00", ghi_w_m2: 500, temperature_c: 15}
+        - {slot_start: "2026-11-18 03:00:00+00", model: jma_gsm, source: live, captured_at: "2026-11-16 23:45:00+00", ghi_w_m2: null, temperature_c: 15}
+        - {slot_start: "2026-11-17 15:00:00+00", model: jma_gsm, source: live, captured_at: "2026-11-16 23:45:00+00", ghi_w_m2: null, temperature_c: 15}
+
+  - name: a_hole_is_filled_from_the_next_model_of_the_same_source
+    description: >
+      D is 11 November. Lead 2 has no MSM hour for the daylight slot, as on that morning in 2026:
+      ECMWF's value fills it, recorded as ECMWF's, and lead 2 still covers D. A Single Run that
+      also covers D comes after lead 2. GSM's radiation stays empty: it has none to fill.
+    model: dws_weather
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-10 00:00:00+00", target_day: "2026-11-11", slot_start: "2026-11-10 15:00:00+00"}
+          - {decision_time: "2026-11-10 00:00:00+00", target_day: "2026-11-11", slot_start: "2026-11-11 03:00:00+00"}
+      - input: ref('dim_daylight')
+        rows:
+          - {slot_start: "2026-11-11 03:00:00+00", is_night: false}
+          - {slot_start: "2026-11-10 15:00:00+00", is_night: true}
+      - input: ref('dim_weather_points')
+        rows:
+          - {point: tokyo}
+      - input: ref('dim_weather_models')
+        rows:
+          - {model: jma_msm, has_radiation: true, fill_order: 1, delay_hours: 3}
+          - {model: ecmwf_ifs025, has_radiation: true, fill_order: 2, delay_hours: 6}
+          - {model: jma_gsm, has_radiation: false, fill_order: 3, delay_hours: 6}
+      - input: ref('dwd_weather_slots')
+        rows:
+          - {source: previous_runs, point: tokyo, model: jma_msm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-10 15:00:00+00", ghi_w_m2: 0, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 8, wind_speed_kmh: 10, known_at: "2026-11-08 12:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: ecmwf_ifs025, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-11 03:00:00+00", ghi_w_m2: 420, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 12, wind_speed_kmh: 10, known_at: "2026-11-08 12:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: ecmwf_ifs025, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-10 15:00:00+00", ghi_w_m2: 0, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 12, wind_speed_kmh: 10, known_at: "2026-11-08 12:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: jma_gsm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-11 03:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 12, wind_speed_kmh: 10, known_at: "2026-11-08 12:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: jma_gsm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-10 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 12, wind_speed_kmh: 10, known_at: "2026-11-08 12:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_msm, lead_days: null, run_time: "2026-11-08 18:00:00+00", captured_at: null, slot_start: "2026-11-11 03:00:00+00", ghi_w_m2: 999, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-08 21:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_msm, lead_days: null, run_time: "2026-11-08 18:00:00+00", captured_at: null, slot_start: "2026-11-10 15:00:00+00", ghi_w_m2: 999, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-08 21:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: "2026-11-08 18:00:00+00", captured_at: null, slot_start: "2026-11-11 03:00:00+00", ghi_w_m2: 999, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-08 21:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: "2026-11-08 18:00:00+00", captured_at: null, slot_start: "2026-11-10 15:00:00+00", ghi_w_m2: 999, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-08 21:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_gsm, lead_days: null, run_time: "2026-11-08 18:00:00+00", captured_at: null, slot_start: "2026-11-11 03:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-08 21:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_gsm, lead_days: null, run_time: "2026-11-08 18:00:00+00", captured_at: null, slot_start: "2026-11-10 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-08 21:00:00+00", known_until: null, basis: rule}
+    expect:
+      rows:
+        - {slot_start: "2026-11-11 03:00:00+00", model: jma_msm, source: previous_runs, ghi_w_m2: 420, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025}
+        - {slot_start: "2026-11-10 15:00:00+00", model: jma_msm, source: previous_runs, ghi_w_m2: 0, ghi_w_m2_model: jma_msm, temperature_c: 8, temperature_c_model: jma_msm}
+        - {slot_start: "2026-11-11 03:00:00+00", model: ecmwf_ifs025, source: previous_runs, ghi_w_m2: 420, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025}
+        - {slot_start: "2026-11-10 15:00:00+00", model: ecmwf_ifs025, source: previous_runs, ghi_w_m2: 0, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025}
+        - {slot_start: "2026-11-11 03:00:00+00", model: jma_gsm, source: previous_runs, ghi_w_m2: null, ghi_w_m2_model: null, temperature_c: 12, temperature_c_model: jma_gsm}
+        - {slot_start: "2026-11-10 15:00:00+00", model: jma_gsm, source: previous_runs, ghi_w_m2: null, ghi_w_m2_model: null, temperature_c: 12, temperature_c_model: jma_gsm}
+
+  - name: a_partial_source_is_passed_over_for_the_run_known_before_t
+    description: >
+      D is 16 November. Lead 2 holds only the night slot, as when the history stopped on the 15th:
+      it doesn't cover D. The Single Runs do: per model, the newest run known strictly before T.
+      MSM's 21:00 run and the others' 18:00 runs land exactly at T under the assumed delays, so
+      the older runs serve (MSM 18:00, ECMWF and GSM 12:00).
+    model: dws_weather
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-15 00:00:00+00", target_day: "2026-11-16", slot_start: "2026-11-15 15:00:00+00"}
+          - {decision_time: "2026-11-15 00:00:00+00", target_day: "2026-11-16", slot_start: "2026-11-16 03:00:00+00"}
+      - input: ref('dim_daylight')
+        rows:
+          - {slot_start: "2026-11-16 03:00:00+00", is_night: false}
+          - {slot_start: "2026-11-15 15:00:00+00", is_night: true}
+      - input: ref('dim_weather_points')
+        rows:
+          - {point: tokyo}
+      - input: ref('dim_weather_models')
+        rows:
+          - {model: jma_msm, has_radiation: true, fill_order: 1, delay_hours: 3}
+          - {model: ecmwf_ifs025, has_radiation: true, fill_order: 2, delay_hours: 6}
+          - {model: jma_gsm, has_radiation: false, fill_order: 3, delay_hours: 6}
+      - input: ref('dwd_weather_slots')
+        rows:
+          - {source: previous_runs, point: tokyo, model: jma_msm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: 0, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-12 12:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: ecmwf_ifs025, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: 0, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-12 12:00:00+00", known_until: null, basis: rule}
+          - {source: previous_runs, point: tokyo, model: jma_gsm, lead_days: 2, run_time: null, captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 5, wind_speed_kmh: 10, known_at: "2026-11-12 12:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_msm, lead_days: null, run_time: "2026-11-14 18:00:00+00", captured_at: null, slot_start: "2026-11-16 03:00:00+00", ghi_w_m2: 400, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 14, wind_speed_kmh: 10, known_at: "2026-11-14 21:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_msm, lead_days: null, run_time: "2026-11-14 18:00:00+00", captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: 0, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 14, wind_speed_kmh: 10, known_at: "2026-11-14 21:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_msm, lead_days: null, run_time: "2026-11-14 21:00:00+00", captured_at: null, slot_start: "2026-11-16 03:00:00+00", ghi_w_m2: 999, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-15 00:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_msm, lead_days: null, run_time: "2026-11-14 21:00:00+00", captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: 0, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-15 00:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: "2026-11-14 12:00:00+00", captured_at: null, slot_start: "2026-11-16 03:00:00+00", ghi_w_m2: 410, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 14, wind_speed_kmh: 10, known_at: "2026-11-14 18:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: "2026-11-14 12:00:00+00", captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: 0, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 14, wind_speed_kmh: 10, known_at: "2026-11-14 18:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: "2026-11-14 18:00:00+00", captured_at: null, slot_start: "2026-11-16 03:00:00+00", ghi_w_m2: 999, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-15 00:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: ecmwf_ifs025, lead_days: null, run_time: "2026-11-14 18:00:00+00", captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: 0, direct_w_m2: 1, diffuse_w_m2: 1, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-15 00:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_gsm, lead_days: null, run_time: "2026-11-14 12:00:00+00", captured_at: null, slot_start: "2026-11-16 03:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 14, wind_speed_kmh: 10, known_at: "2026-11-14 18:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_gsm, lead_days: null, run_time: "2026-11-14 12:00:00+00", captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 14, wind_speed_kmh: 10, known_at: "2026-11-14 18:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_gsm, lead_days: null, run_time: "2026-11-14 18:00:00+00", captured_at: null, slot_start: "2026-11-16 03:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-15 00:00:00+00", known_until: null, basis: rule}
+          - {source: single_runs, point: tokyo, model: jma_gsm, lead_days: null, run_time: "2026-11-14 18:00:00+00", captured_at: null, slot_start: "2026-11-15 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-15 00:00:00+00", known_until: null, basis: rule}
+    expect:
+      rows:
+        - {slot_start: "2026-11-16 03:00:00+00", model: jma_msm, source: single_runs, run_time: "2026-11-14 18:00:00+00", ghi_w_m2: 400, temperature_c: 14}
+        - {slot_start: "2026-11-15 15:00:00+00", model: jma_msm, source: single_runs, run_time: "2026-11-14 18:00:00+00", ghi_w_m2: 0, temperature_c: 14}
+        - {slot_start: "2026-11-16 03:00:00+00", model: ecmwf_ifs025, source: single_runs, run_time: "2026-11-14 12:00:00+00", ghi_w_m2: 410, temperature_c: 14}
+        - {slot_start: "2026-11-15 15:00:00+00", model: ecmwf_ifs025, source: single_runs, run_time: "2026-11-14 12:00:00+00", ghi_w_m2: 0, temperature_c: 14}
+        - {slot_start: "2026-11-16 03:00:00+00", model: jma_gsm, source: single_runs, run_time: "2026-11-14 12:00:00+00", ghi_w_m2: null, temperature_c: 14}
+        - {slot_start: "2026-11-15 15:00:00+00", model: jma_gsm, source: single_runs, run_time: "2026-11-14 12:00:00+00", ghi_w_m2: null, temperature_c: 14}
