@@ -99,8 +99,10 @@ class FetchItem:
     headers: dict[str, str] = field(default_factory=dict)
     expand: Callable[[bytes], list[FetchItem]] | None = field(default=None, compare=False)
     """An index page: once stored, its body gives the items to fetch next. Always fetched."""
-    once: bool = False
-    """Fetched only if no file of this name is stored yet, even by the daily capture."""
+    watched: bool = False
+    """For a file the source may replace in place, under the same link. The daily capture fetches
+    it if no file of this name is stored yet; after that it asks for its headers only (`HEAD`) and
+    fetches it again only when `Last-Modified` differs from the newest stored copy's."""
 
 
 @dataclass(frozen=True)
@@ -374,8 +376,10 @@ def _fit_page(expand: Callable[[bytes], list[FetchItem]]) -> FetchItem:
 
 
 def _fit_daily(_now: datetime) -> list[FetchItem]:
-    """The page every day (its notices date each release), and any release not stored yet."""
-    return [_fit_page(lambda page: [replace(i, once=True) for i in fit_links(page)])]
+    """The page every day (its notices date each release), any release not stored yet, and again
+    any release whose `Last-Modified` changed: a replaced file keeps its link, and the server
+    ignores `If-Modified-Since` (notebooks/04_ods_to_dwd.ipynb, section 6.6)."""
+    return [_fit_page(lambda page: [replace(i, watched=True) for i in fit_links(page)])]
 
 
 def _wayback_snapshots(cdx: bytes) -> list[FetchItem]:
