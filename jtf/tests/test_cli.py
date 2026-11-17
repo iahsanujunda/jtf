@@ -24,3 +24,15 @@ def test_parse_needs_both_stores(monkeypatch):
     result = runner.invoke(app, ["parse", "--source", "tepco_actuals", "--from", "2026-11-15"])
     assert result.exit_code != 0
     assert "JTF_" in result.output
+
+
+def test_ci_refuses_any_prefix_but_a_ci_runs_before_touching_bigquery(monkeypatch):
+    def no_bigquery(*args, **kwargs):
+        raise AssertionError("a BigQuery client was made")
+
+    monkeypatch.setattr("google.cloud.bigquery.Client", no_bigquery)
+    for command in ("create", "drop"):
+        args = ["ci", command, "--project", "p", "--location", "l", "--prefix", "dev"]
+        result = runner.invoke(app, args)
+        assert result.exit_code == 2
+        assert "not a CI run's prefix" in result.output

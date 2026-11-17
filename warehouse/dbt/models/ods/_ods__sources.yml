@@ -1,11 +1,12 @@
 version: 2
 
 # ODS is loaded by the jtf parsers (jtf/src/jtf/parse), append-only, one table per file layout.
-# Named ods/<table> as in Dagster, so lineage runs from each raw file to every model.
+# Named ods/<table> as in Dagster, so lineage runs from each raw file to every model. CI points
+# `ods_dataset` at its own empty copy (`jtf ci create`), so it never reads the real ODS.
 sources:
   - name: ods
     database: "{{ env_var('JTF_BIGQUERY_PROJECT') }}"
-    schema: ods
+    schema: "{{ var('ods_dataset', 'ods') }}"
     tables:
       - name: raw_files
         description: >

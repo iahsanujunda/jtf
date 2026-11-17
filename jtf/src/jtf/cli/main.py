@@ -127,3 +127,53 @@ def parse(
             ok = ok and result.ok
     if not ok:
         raise typer.Exit(code=1)
+
+
+ci = typer.Typer(
+    help="A CI run's throwaway datasets: empty ODS and predictions tables; no real data.",
+    no_args_is_help=True,
+)
+app.add_typer(ci, name="ci")
+
+Project = Annotated[str, typer.Option(envvar="JTF_BIGQUERY_PROJECT", help="The dev project.")]
+Location = Annotated[str, typer.Option(envvar="JTF_BIGQUERY_LOCATION", help="BigQuery region.")]
+
+
+def _ci_prefix(prefix: str) -> str:
+    """Only a CI run's prefix (ci_<run id>), never dev's or a person's datasets."""
+    from jtf.ci import ci_prefix
+
+    try:
+        return ci_prefix(prefix)
+    except ValueError as e:
+        raise typer.BadParameter(str(e), param_hint="--prefix") from e
+
+
+Prefix = Annotated[
+    str,
+    typer.Option(
+        envvar="JTF_DBT_DATASET_PREFIX", callback=_ci_prefix, help="The run's prefix: ci_<run id>."
+    ),
+]
+
+
+@ci.command("create")
+def ci_create(project: Project, location: Location, prefix: Prefix) -> None:
+    """Make the run's datasets, its empty ODS tables and its empty predictions table."""
+    from google.cloud import bigquery
+
+    from jtf.ci import create
+
+    made = create(bigquery.Client(project=project, location=location), project, location, prefix)
+    typer.echo(f"{prefix}: {len(made)} empty tables, in datasets whose tables expire in a day")
+
+
+@ci.command("drop")
+def ci_drop(project: Project, location: Location, prefix: Prefix) -> None:
+    """Drop every dataset of the run with its tables. Only a CI run's prefix is accepted."""
+    from google.cloud import bigquery
+
+    from jtf.ci import drop
+
+    drop(bigquery.Client(project=project, location=location), project, prefix)
+    typer.echo(f"{prefix}: dropped")

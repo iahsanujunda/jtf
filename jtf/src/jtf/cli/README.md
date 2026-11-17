@@ -7,6 +7,7 @@ The `jtf` entry point. Each subcommand is a thin wrapper over a function in anot
 | `jtf fetch --source S [--initial \| --recapture] [--max-calls N]` | Download a source into the raw bucket: daily, the one-off history load, or the monthly check for rewrites | 1 |
 | `jtf sources` | List the sources and the modes each supports | 1 |
 | `jtf parse --source S --from D1 --to D2` | Raw files → ODS rows (normally run by Dagster's ODS assets) | 1 |
+| `jtf ci create` / `jtf ci drop` | A CI run's throwaway datasets: an empty ODS from the parsers' schemas and an empty predictions table, so `dbt build --empty` reads no real data; only a `ci_<run id>` prefix is accepted | 1 |
 | `jtf transform [--select …]` | Run dbt for the derived layers | 1 |
 | `jtf backtest` / `jtf train` | Rolling backtest; train a model version | 1 |
 | `jtf replay --as-of T --mode reproduce\|what-if` | The time machine | 1 |

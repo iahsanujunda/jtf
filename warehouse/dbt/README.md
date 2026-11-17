@@ -11,7 +11,7 @@ dbt-bigquery project, one dataset per layer. Dagster loads the models as assets 
 | [ADS](models/ads/) | Outputs: labels, predictions and their outcomes; published forecasts' input snapshots | 1 (labels, backtests), 2 (daily) |
 | [monitoring](models/monitoring/) | Drift, accuracy, dashboard snapshots | 3 |
 
-Targets: `dev` (datasets named `<prefix>_<layer>` in the dev project, the prefix from `JTF_DBT_DATASET_PREFIX`), `ci` (a throwaway prefix per PR), `prod` (written only by CI). Settings come from the environment, through [profiles.yml](profiles.yml); locally, `make dbt` reads them from `.env` and runs `dbt build`, and `make dbt ARGS="test --select dwd_tepco_actuals"` runs anything else.
+Targets: `dev` (datasets named `<prefix>_<layer>` in the dev project, the prefix from `JTF_DBT_DATASET_PREFIX`), `ci` (a throwaway prefix per run, `ci_<run id>`, on an empty ODS made by `jtf ci create`; any query reading over 100 MB fails, since an empty build should read nothing), `prod` (written only by CI). Settings come from the environment, through [profiles.yml](profiles.yml); locally, `make dbt` reads them from `.env` and runs `dbt build`, and `make dbt ARGS="test --select dwd_tepco_actuals"` runs anything else.
 
 Rules: no layer reads one above it, and only DWD reads ODS; DWS reads versioned DWD models only through the as-of macro in [macros/](macros/), and DIM directly; no `CURRENT_DATE()` or `NOW()` anywhere. The checks in [rules/](rules/) enforce them, as they are built: the layers' reads now, with pytest.
 
@@ -24,3 +24,12 @@ The warehouse owns every test of its SQL:
 - **Rules** in [rules/](rules/): manifest and sqlglot checks over compiled SQL, and a fingerprint test that ODS rows never change
 
 In CI the unit tests, an empty build and the rules run in a throwaway PR dataset that reads no real data. The data tests run on real data after every build, as Dagster checks; the fingerprint after every load, once built (before step 6).
+
+CI's check, run by hand against the dev project (needs `bigquery.user` there):
+
+```
+set -a; . ./.env; set +a; export JTF_DBT_DATASET_PREFIX=ci_0_1
+uv run jtf ci create
+(cd warehouse/dbt && uv run dbt build --empty --exclude test_type:data --target ci --profiles-dir . --vars "{ods_dataset: ${JTF_DBT_DATASET_PREFIX}_ods}")
+uv run jtf ci drop
+```
