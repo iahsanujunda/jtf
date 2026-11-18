@@ -1,5 +1,5 @@
 # Local shortcuts only. CI calls the same tools directly.
-.PHONY: setup lint fmt test rules image dagster dagster-update dbt
+.PHONY: setup lint fmt test rules e2e image dagster dagster-update dbt
 
 IMAGE ?= jtf:local
 # Settings live in the main checkout's .env, gitignored, so worktrees read that one
@@ -23,6 +23,11 @@ test:
 # no data but needs BigQuery, so `make test` skips them
 rules:
 	set -a; . $(ENV_FILE); set +a; JTF_RULES_COMPILE=1 uv run pytest warehouse/dbt/rules
+
+# The e2e tests (e2e_tests/README.md) with the settings in .env: their world loaded into throwaway
+# datasets in the dev project, dropped after. A few minutes, a few GB billed
+e2e:
+	set -a; . $(ENV_FILE); set +a; JTF_DBT_DATASET_PREFIX=ci_$$(date +%s)_e2e uv run pytest e2e_tests
 
 image:
 	docker build -t $(IMAGE) .

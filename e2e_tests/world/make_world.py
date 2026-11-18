@@ -6,7 +6,11 @@ spreadsheets of the capacity releases are cut to what the warehouse reads: each 
 header rows, Shizuoka's cities (the TEPCO area's part east of the Fuji River) and the national
 total the parser checks for. Their sidecars then describe the cut file and name the original.
 Raw files never change and nothing extracted after the world's last day is taken, so running this
-again gives the same world. Run by hand, with the bucket in `JTF_RAW_URL`:
+again gives the same world.
+
+Beside it, `late/` holds raw files the backfill test plants as a late history load: October's
+actuals as the initial history load fetched them, a month the world has no file of. Run by hand,
+with the bucket in `JTF_RAW_URL`:
 
     set -a; . ./.env; set +a; uv run python e2e_tests/world/make_world.py
 """
@@ -26,6 +30,7 @@ from jtf.ingest.landed import SIDECAR
 from jtf.storage import open_store
 
 WORLD = Path(__file__).parent / "raw"
+LATE = Path(__file__).parent / "late"
 LAST_DAY = "2026-11-18"
 # The files the window's decision times read, by source (e2e_tests/README.md, The test world)
 TAKE = {
@@ -39,6 +44,8 @@ TAKE = {
         r"|^\d{8}T\d{6}Z_PublicInfoSummary\.html$"
     ),
 }
+# For the backfill test: a past month's actuals, as the initial history load fetched them
+TAKE_LATE = {"tepco_actuals": re.compile(r"_eria_jukyu_202610_03\.csv$")}
 # The Single Runs that can be served at 09:00 on the 15th: the newest known before it per model
 RUNS = ("2026-11-13T00Z", "2026-11-15T00Z")
 CITY = re.compile(r"_B_city\d{6}\.xlsx$")
@@ -91,7 +98,8 @@ def stable(xlsx: bytes) -> bytes:
 
 def main() -> None:
     store = open_store(os.environ["JTF_RAW_URL"])
-    shutil.rmtree(WORLD, ignore_errors=True)
+    for folder in (WORLD, LATE):
+        shutil.rmtree(folder, ignore_errors=True)
     for source in TAKE:
         for path in sorted(p for p in store.list(f"{source}/") if taken(p)):
             body, meta = store.get(path), json.loads(store.get(path + SIDECAR))
@@ -104,12 +112,24 @@ def main() -> None:
                     "cut": "for the e2e world: header rows, 静岡県 and 合計 only; "
                     f"the original's sha256 {original}",
                 }
-            target = WORLD / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(body)
-            (WORLD / (path + SIDECAR)).write_text(json.dumps(meta, ensure_ascii=False, indent=1))
-    files = [f for f in WORLD.rglob("*") if f.is_file() and not f.name.endswith(SIDECAR)]
-    print(f"{len(files)} files, {sum(f.stat().st_size for f in files) / 1e6:.1f} MB in {WORLD}")
+            write(WORLD, path, body, meta)
+    for source, name in TAKE_LATE.items():
+        for path in sorted(p for p in store.list(f"{source}/") if name.search(p)):
+            meta = json.loads(store.get(path + SIDECAR))
+            if meta["load_type"] == "initial":
+                write(LATE, path, store.get(path), meta)
+    for folder in (WORLD, LATE):
+        files = [f for f in folder.rglob("*") if f.is_file() and not f.name.endswith(SIDECAR)]
+        print(
+            f"{len(files)} files, {sum(f.stat().st_size for f in files) / 1e6:.1f} MB in {folder}"
+        )
+
+
+def write(folder: Path, path: str, body: bytes, meta: dict) -> None:
+    target = folder / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
+    (folder / (path + SIDECAR)).write_text(json.dumps(meta, ensure_ascii=False, indent=1))
 
 
 if __name__ == "__main__":

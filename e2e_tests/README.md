@@ -10,9 +10,23 @@ Only the guarantees no single component can prove alone. Everything else is test
 | Reproduce | A what-if run, then a reproduce of that run, match exactly | jtf + dbt + run records |
 | One day end to end | A small fixture world goes raw → ODS → DWD → DWS → forecast with the expected shape and checks | all of the pipeline |
 
-Run against a throwaway PR dataset in the dev project, through Workload Identity Federation in CI. They run when `jtf/` or `warehouse/` changes.
+"Identical" is checked by fingerprint, the function the ODS check uses ([fingerprint.py](../jtf/src/jtf/parse/fingerprint.py)): each decision time's DWS rows, every table after a rebuild, and each run's inputs and outputs (`ads_runs`).
 
-"Identical" is checked by fingerprint, the function the ODS check uses ([fingerprint.py](../jtf/src/jtf/parse/fingerprint.py)): each decision time's DWS and ADS rows, and each run's inputs and outputs (`ads_runs`).
+## Running them
+
+`make e2e` with the settings in `.env`, and CI's `e2e` job on every pull request that changes `jtf/`, `warehouse/dbt/` or `e2e_tests/` ([workflows](../.github/workflows/README.md)). Both work in throwaway datasets of the dev project, `ci_<run id>[_<attempt>]_e2e_<layer>`, made and dropped by the tests; their tables expire after a day in case a run dies first. `make test` doesn't run them.
+
+The tests share one world, built once per session ([conftest.py](conftest.py)): its datasets made as `jtf ci create` makes them, its raw files parsed with every parser side by side, then `dbt seed` and `dbt run` with the window's variables under the `e2e` target, which fails a query reading over 1 GB. [harness.py](harness.py) holds what the tests do with it: parse, run dbt, plant files and fingerprint. A run takes about five minutes: a minute for the world, the rest the tests. It bills about 5.5 GB for 0.3 GB read: some 450 queries, each billed BigQuery's 10 MB minimum, half of them the data tests.
+
+| Test | Plants | Compares |
+| --- | --- | --- |
+| One day end to end | Nothing: a what-if run of target days 17 and 18, its outcomes built, then every data test | Every decision time has 48 slots with D−2, capacity and clear sky; 48 outcomes a day, the 17th all labelled; the run counts the 16th approximate and the 17th exact, as `dws_fidelity` has them |
+| Determinism | Nothing: `dbt run --full-refresh`, every model from the ODS again | Every table's fingerprint before and after; two what-if runs of the window, their inputs and outputs |
+| Reproduce | Nothing | A what-if run of the window and its reproduce, inputs and outputs |
+| Future poison | Copies of the newest actuals file, live forecast and Previous Runs file with every figure 999,999, captured an hour after the last decision time | What each decision time sees, before and after; the poison is in DWD, so a pass means `as_of` kept it out; a reproduce of a run made before |
+| Backfill stability | October's actuals as the initial load fetched them, a month the world has no file of, and the newest November file again with one slot's solar 1,000 MW higher, both loaded as an initial load the day after the window | What each decision time sees; the actuals versions read at seven times through the `as_of` predicate, two before the window and its five: none read before is gone, every new one is rule-dated and before capture start; the correction is known only from the late load; the ODS rows loaded before are as loaded; a reproduce of a run made before |
+
+Each test was seen to fail with the logic it guards removed (2026-11-18): fidelity counting rule-dated versions as exact, a model reading the clock, a reproduce comparing run IDs, D−2 read as its newest version instead of through `as_of`, and corrections dated by the history rule.
 
 ## The test world
 

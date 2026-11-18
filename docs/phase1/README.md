@@ -217,14 +217,14 @@ Definitions live in `jtf/src/jtf/orchestration`; assets are thin wrappers over `
 
 ## Time machine
 
-The replay job (run config: `mode`, `T` range, optional `fault`), also available as `jtf replay --as-of T --mode reproduce|what-if [--from D1 --to D2] [--fault F…]`.
+The `replay` job in Dagster (run config: `mode`, the target days or the run to reproduce, and `fault`, refused until step 8's presets exist), also available as `jtf replay --from D1 --to D2 [--model M]` for a what-if and `jtf replay --reproduce RUN` for a reproduce. A backtest is the same mechanism over its folds, then scored (the `backtest` job). Every run appends its predictions to ADS under its run ID and mode, and one row to `ads_runs`: its code, its fidelity counts, and fingerprints of the features it read and the predictions it wrote ([jtf/src/jtf/ml](../../jtf/src/jtf/ml/README.md)).
 
 | Mode | Code and model | Expected result |
 | --- | --- | --- |
-| Reproduce | The image digest and model version recorded in `ads.runs` | Identical to the original run |
-| What-if | The current or a candidate image and model | A new run, written to a replay dataset |
+| Reproduce | The code recorded in `ads_runs`: its git commit until images exist, then its image digest. Refused on another commit, or with uncommitted changes then or now | Identical to the original run, by fingerprint; else it fails, saying whether the data or the code changed |
+| What-if | The code checked out now | A new run over any target days |
 
-What it needs in phase 1: raw files never modified and an append-only ODS; everything that is not data inside the image; every run recorded in `ads.runs` with its input snapshot; determinism (float sums added in a fixed order or rounded, since BigQuery doesn't promise the same `SUM` of floats twice; `T` passed in, fixed seeds, LightGBM `deterministic=True` with a fixed `num_threads`, inputs sorted); replays writing only to replay datasets.
+What it needs in phase 1: raw files never modified and an append-only ODS; everything that is not data in the commit (later the image); every run recorded in `ads_runs` with fingerprints of its inputs and outputs; determinism (float sums added in a fixed order or rounded, since BigQuery doesn't promise the same `SUM` of floats twice; `T` passed in, fixed seeds, LightGBM `deterministic=True` with a fixed `num_threads`, inputs sorted). Phase 1 has no published forecast, so replays write to the dev ADS datasets beside backtests, each under its run ID and mode; how they stay apart from published forecasts is decided with the daily forecast in phase 2.
 
 **Fidelity:** per input and decision time, in `dws_fidelity`: an input is `exact` at `T` when every version it read was captured (capacity's rule-dated releases count, being as precise as a capture), `approximate` when it read history dated by a rule ([notebook 06](../../notebooks/06_warehouse_against_sources.ipynb), section 3). A run is exact at `T` only where every input its model reads is, and `ads_runs` keeps each run's counts. Persistence is exact from 09:00 on 2026-11-17, a model reading seven days of actuals from the 23rd; the exact range grows by a day each day. Nearly all phase-1 backtests are `approximate`: JEPX exact, TEPCO actuals slightly optimistic, weather slightly pessimistic (`previous_day2`), no TEPCO benchmark. Results always say which.
 
@@ -234,6 +234,9 @@ What it needs in phase 1: raw files never modified and an append-only ODS; every
 - Future poison: insert rows with `known_at` after `T` and absurd values; a replay at `T` must not change
 - Backfill stability: build features as of several past `T`, load a simulated backfill fetched now (raw files for past periods, as a late initial load would bring), and build them again. Every input captured before `T` must come out identical; new rows may appear only with `basis = rule`, and only for times before their source's capture start. A backfill must never change what a past forecast saw
 - Reproduce: a what-if run, then a reproduce of that run, match exactly
+- One day end to end: a small world of real raw files goes from raw files to a forecast, with every check green
+
+They run on that world, five target days of real raw files across the seam at capture start, in CI's `e2e` job ([e2e_tests](../../e2e_tests/README.md)).
 
 ## Model and evaluation
 
