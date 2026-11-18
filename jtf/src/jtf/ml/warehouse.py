@@ -10,8 +10,8 @@ from google.cloud import bigquery
 
 from jtf.parse.fingerprint import ROW_JSON
 
-PREDICTIONS = "ads_prediction_solar"
-RUNS = "ads_runs"
+PREDICTIONS = "ads_ml_prediction_solar"
+RUNS = "ads_ml_runs"
 # What a run reads of the features, and the part of its predictions a reproduce must match: not
 # its run ID or mode, which differ by design
 FEATURE_COLUMNS = ["decision_time", "target_day", "slot_start", "solar_d2_mw"]
@@ -74,7 +74,7 @@ class BacktestWarehouse:
             select max(day) as day
             from (
                 select date(slot_start, 'Asia/Tokyo') as day
-                from `{self.table("ads", "ads_label_solar")}`
+                from `{self.table("ads", "ads_ml_label_solar")}`
                 where label_mw is not null
                 group by day
                 having count(*) = 48
@@ -134,7 +134,7 @@ class BacktestWarehouse:
         return found.set_index("decision_time")["exact"].astype(bool)
 
     def append_run(self, record: pd.DataFrame) -> None:
-        """Append one run's record; ads_runs is append-only, like the predictions."""
+        """Append one run's record; ads_ml_runs is append-only, like the predictions."""
         config = bigquery.LoadJobConfig(
             schema=RUN_SCHEMA, write_disposition=bigquery.WriteDisposition.WRITE_APPEND
         )
@@ -164,10 +164,11 @@ class BacktestWarehouse:
         self.client.load_table_from_dataframe(rows, table, job_config=config).result()
 
     def outcomes(self, run_id: str) -> pd.DataFrame:
-        """One run's rows of ads_outcome_solar, sorted, so its metrics add up the same each time."""
+        """One run's rows of ads_ml_outcome_solar, sorted, so its metrics add up the same each
+        time."""
         sql = f"""
             select fold, decision_time, slot_start, error_mw, error_share, is_daylight
-            from `{self.table("ads", "ads_outcome_solar")}`
+            from `{self.table("ads", "ads_ml_outcome_solar")}`
             where run_id = @run_id
             order by fold, decision_time, slot_start
         """

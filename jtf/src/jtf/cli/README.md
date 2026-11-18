@@ -13,7 +13,7 @@ The `jtf` entry point. Each subcommand is a thin wrapper over a function in anot
 | `jtf dagster update` | Bring the checkout the laptop's Dagster runs from up to `main` with no run in between: stop the sensors, wait for running runs, pull, reload, start the sensors (`make dagster-update`) | 1 |
 | `jtf transform [--select …]` | Run dbt for the derived layers | 1 |
 | `jtf backtest` / `jtf train` | Rolling backtest; train a model version | 1 |
-| `jtf replay --from D1 --to D2 [--model M]` or `jtf replay --reproduce RUN` | The time machine: a what-if run over target days, or a reproduce of an earlier run, which must match it exactly; recorded in `ads_runs` ([ml](../ml/README.md)) | 1 |
+| `jtf replay --from D1 --to D2 [--model M]` or `jtf replay --reproduce RUN` | The time machine: a what-if run over target days, or a reproduce of an earlier run, which must match it exactly; recorded in `ads_ml_runs` ([ml](../ml/README.md)) | 1 |
 | `jtf predict --as-of T` | Forecast the 48 slots of D | 1 (laptop), 2 (scheduled) |
 | `jtf daily --as-of T` | The whole daily path without Dagster: the fallback job | 2 |
 | `jtf evaluate` | Accuracy, drift, dashboard snapshot | 3 |

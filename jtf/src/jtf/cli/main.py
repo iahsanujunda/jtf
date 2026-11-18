@@ -282,7 +282,7 @@ def replay(
 ) -> None:
     """The time machine: a what-if run of a model over target days (--from, --to, YYYY-MM-DD),
     or a reproduce of an earlier run (--reproduce), which must match it exactly. Each run is
-    recorded in ads_runs."""
+    recorded in ads_ml_runs."""
     if bool(original) == bool(first or last) or (not original and not (first and last)):
         raise typer.BadParameter(
             "give --from and --to for a what-if, or --reproduce for a reproduce"

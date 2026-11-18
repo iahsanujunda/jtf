@@ -47,7 +47,7 @@ def stored(world, run_id: str) -> pd.Series:
 
 def test_one_day_goes_from_raw_files_to_a_forecast_and_every_check_passes(world):
     record = what_if(world, "e2e-one-day", date(2026, 11, 17), date(2026, 11, 18))
-    world.dbt("run", "--select", "ads_outcome_solar")
+    world.dbt("run", "--select", "ads_ml_outcome_solar")
     world.dbt("test", "--exclude", "test_type:unit", *NOT_IN_THE_WINDOW)
 
     features = world.query(f"""
@@ -61,7 +61,7 @@ def test_one_day_goes_from_raw_files_to_a_forecast_and_every_check_passes(world)
     assert set(features["without_capacity"]) == {0}
     outcomes = world.query(f"""
         select target_day, count(*) as slots, countif(label_mw is not null) as labelled
-        from `{world.table("ads", "ads_outcome_solar")}`
+        from `{world.table("ads", "ads_ml_outcome_solar")}`
         where run_id = 'e2e-one-day'
         group by target_day order by target_day
     """)

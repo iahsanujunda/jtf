@@ -21,7 +21,7 @@ select
     c.capacity_mw,
     safe_divide(p.predicted_mw - l.label_mw, c.capacity_mw) as error_share,
     not d.is_night as is_daylight
-from {{ source('ads', 'ads_prediction_solar') }} as p
-left join {{ ref('ads_label_solar') }} as l on l.slot_start = p.slot_start
+from {{ source('ads', 'ads_ml_prediction_solar') }} as p
+left join {{ ref('ads_ml_label_solar') }} as l on l.slot_start = p.slot_start
 left join {{ ref('dws_capacity') }} as c on c.decision_time = p.decision_time
 left join {{ ref('dim_daylight') }} as d on d.slot_start = p.slot_start
