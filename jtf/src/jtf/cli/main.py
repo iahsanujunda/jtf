@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -177,3 +178,29 @@ def ci_drop(project: Project, location: Location, prefix: Prefix) -> None:
 
     drop(bigquery.Client(project=project, location=location), project, prefix)
     typer.echo(f"{prefix}: dropped")
+
+
+dagster = typer.Typer(help="The laptop's Dagster.", no_args_is_help=True)
+app.add_typer(dagster, name="dagster")
+
+
+@dagster.command("update")
+def dagster_update(
+    repo: Annotated[Path, typer.Option(help="The checkout Dagster runs from.")] = Path("."),
+    url: Annotated[
+        str, typer.Option(help="Dagster's GraphQL API.")
+    ] = "http://localhost:3000/graphql",
+    timeout: Annotated[float, typer.Option(help="Seconds to wait for running runs.")] = 900,
+) -> None:
+    """Pull main into Dagster's checkout and reload it, with no run in between: stop the sensors,
+    wait for running runs, pull, reload, start the sensors again."""
+    from jtf.orchestration.update import Dagster, Git, Refused, update
+
+    try:
+        typer.echo(update(Git(repo.resolve()), Dagster(url), timeout=timeout, echo=typer.echo))
+    except Refused as e:
+        typer.echo(f"nothing pulled: {e}", err=True)
+        raise typer.Exit(code=1) from e
+    except RuntimeError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
