@@ -51,6 +51,19 @@ models:
       - name: correction
         description: True when this version replaced an earlier value.
     data_tests:
+      # A rule never dates a version later than the fetch that first held it.
+      - expression_is_true:
+          name: dwd_tepco_actuals__rule_never_after_its_first_fetch
+          arguments:
+            expression: basis != 'rule' or known_at <= first_seen
+      - known_at_within_fetches:
+          name: dwd_tepco_actuals__no_known_at_after_newest_fetch
+          arguments:
+            sources: [tepco_actuals]
+      - rule_before_capture_start:
+          name: dwd_tepco_actuals__rule_only_before_capture_start
+          arguments:
+            source_name: tepco_actuals
       - unique_combination:
           arguments:
             columns: [slot_start, measure, known_at]
@@ -111,6 +124,19 @@ models:
         description: The fetch time at which we first held both tables.
         data_tests: [not_null]
     data_tests:
+      # A rule never dates a version later than the fetch that first held it.
+      - expression_is_true:
+          name: dwd_capacity_releases__rule_never_after_its_first_fetch
+          arguments:
+            expression: basis != 'rule' or known_at <= first_held
+      - known_at_within_fetches:
+          name: dwd_capacity_releases__no_known_at_after_newest_fetch
+          arguments:
+            sources: [meti_fit_capacity]
+      - rule_before_capture_start:
+          name: dwd_capacity_releases__rule_only_before_capture_start
+          arguments:
+            source_name: meti_fit_capacity
       - expression_is_true:
           arguments:
             expression: (basis = 'rule') = (rule is not null)
@@ -203,6 +229,24 @@ models:
       - name: correction
         description: True when this version replaced earlier figures.
     data_tests:
+      # A captured version is never known before the fetch that held it.
+      - expression_is_true:
+          name: dwd_capacity_area__captured_never_before_its_fetch
+          arguments:
+            expression: basis != 'captured' or known_at >= first_seen
+      # A rule never dates a version later than the fetch that first held it.
+      - expression_is_true:
+          name: dwd_capacity_area__rule_never_after_its_first_fetch
+          arguments:
+            expression: basis != 'rule' or known_at <= first_seen
+      - known_at_within_fetches:
+          name: dwd_capacity_area__no_known_at_after_newest_fetch
+          arguments:
+            sources: [meti_fit_capacity]
+      - rule_before_capture_start:
+          name: dwd_capacity_area__rule_only_before_capture_start
+          arguments:
+            source_name: meti_fit_capacity
       - unique_combination:
           arguments:
             columns: [ref_date, point, known_at]
@@ -250,6 +294,15 @@ models:
               arguments:
                 values: [rule, captured]
     data_tests:
+      # No capture start: a rule never dates a version later than the fetch that first held it.
+      - expression_is_true:
+          name: dwd_weather_previous_runs__rule_never_after_its_first_fetch
+          arguments:
+            expression: basis != 'rule' or known_at <= first_seen
+      - known_at_within_fetches:
+          name: dwd_weather_previous_runs__no_known_at_after_newest_fetch
+          arguments:
+            sources: [openmeteo_previous_runs]
       - unique_combination:
           arguments:
             columns: [point, model, lead_days, valid_time, known_at]
@@ -302,6 +355,20 @@ models:
               arguments:
                 values: [rule, captured]
     data_tests:
+      # A captured version is never known before the fetch that held it.
+      - expression_is_true:
+          name: dwd_weather_single_runs__captured_never_before_its_fetch
+          arguments:
+            expression: basis != 'captured' or known_at >= first_seen
+      # No capture start: a rule never dates a version later than the fetch that first held it.
+      - expression_is_true:
+          name: dwd_weather_single_runs__rule_never_after_its_first_fetch
+          arguments:
+            expression: basis != 'rule' or known_at <= first_seen
+      - known_at_within_fetches:
+          name: dwd_weather_single_runs__no_known_at_after_newest_fetch
+          arguments:
+            sources: [openmeteo_single_runs]
       - unique_combination:
           arguments:
             columns: [point, model, run_time, valid_time, known_at]
@@ -351,6 +418,10 @@ models:
               arguments:
                 values: [captured]
     data_tests:
+      - known_at_within_fetches:
+          name: dwd_weather_live__no_known_at_after_newest_fetch
+          arguments:
+            sources: [openmeteo_live]
       - unique_combination:
           arguments:
             columns: [point, model, captured_at, valid_time, known_at]
@@ -401,6 +472,10 @@ models:
               arguments:
                 values: [rule, captured]
     data_tests:
+      - known_at_within_fetches:
+          name: dwd_weather_slots__no_known_at_after_newest_fetch
+          arguments:
+            sources: [openmeteo_previous_runs, openmeteo_single_runs, openmeteo_live]
       - unique_combination:
           arguments:
             columns: [source, point, model, lead_days, run_time, captured_at, slot_start, known_at]
