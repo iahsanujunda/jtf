@@ -8,6 +8,7 @@ dev = [
     "pvlib>=0.16",
     "pytest>=8.3",
     "ruff>=0.8",
+    "sqlglot>=30.31",
 ]
 # MLflow for the backtest's tracking, apart from the image: `make dagster` adds it.
 ml = [
