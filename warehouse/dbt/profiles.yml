@@ -28,3 +28,16 @@ jtf:
       job_execution_timeout_seconds: 300
       job_retries: 1
       maximum_bytes_billed: 100000000
+    # The e2e tests' world (e2e_tests/README.md): five days of real raw files in a CI prefix, a few
+    # MB in all, so a query that reads more than 1 GB reached something else, and fails.
+    e2e:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('JTF_BIGQUERY_PROJECT') }}"
+      dataset: "{{ env_var('JTF_DBT_DATASET_PREFIX') }}"
+      location: "{{ env_var('JTF_BIGQUERY_LOCATION') }}"
+      threads: 8
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1
+      maximum_bytes_billed: 1000000000

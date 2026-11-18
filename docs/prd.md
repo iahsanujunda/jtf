@@ -134,10 +134,10 @@ What it needs:
 - DWS holds features per decision time and slot for every decision time, built in one pass, so a full-history backtest is one query rather than a loop over days
 - Replays write only to replay datasets, tagged with a replay ID
 
-**Fidelity.** Every replayed forecast carries a `fidelity` flag, and every backtest result states which one it rests on:
+**Fidelity.** Every replayed forecast carries a `fidelity` flag per input, and every backtest result states which one it rests on. It comes from the versions each decision time actually read, not from a date: just after capture start, `T` can still read history ([notebook 06](../notebooks/06_warehouse_against_sources.ipynb), section 3).
 
-- `exact`: `T` is after capture start, so every input version was captured with its real fetch time
-- `approximate`: `T` is before capture start. JEPX is exact; TEPCO actuals are optimistic (later corrections are baked in); weather is pessimistic (`previous_day2`) or relies on assumed delays (Single Runs); the TEPCO benchmark is absent. The optimism-gap experiment and a `previous_day2` vs Single Runs comparison measure how far off each one is
+- `exact`: every version of the input read at `T` was captured, with its real fetch time. A capacity release dated by the history rule counts too: its files never changed after its date, and the rule never dates it early, so it is as precise as a capture
+- `approximate`: the input read at `T` holds history dated by a rule. A replay at `T` is exact only where every input its model reads is. Before capture start, JEPX is exact; TEPCO actuals are optimistic (later corrections are baked in); weather is pessimistic (`previous_day2`) or relies on assumed delays (Single Runs); the TEPCO benchmark is absent. The optimism-gap experiment and a `previous_day2` vs Single Runs comparison measure how far off each one is
 
 **Tests and checks**
 

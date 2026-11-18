@@ -14,6 +14,7 @@ jobs:
     outputs:
       jtf: ${{ steps.filter.outputs.jtf }}
       warehouse: ${{ steps.filter.outputs.warehouse }}
+      e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -21,7 +22,8 @@ jobs:
         with:
           # The jtf job lints every notebook, and its tests load the dbt project into Dagster,
           # so a change to either runs it too. The warehouse job also runs when the ODS schemas
-          # or the predictions table change, since CI makes its empty tables from them.
+          # or the predictions table change, since CI makes its empty tables from them. The e2e
+          # tests run the parsers, dbt and the runs together, so any of them runs those.
           filters: |
             jtf:
               - 'jtf/**'
@@ -37,6 +39,13 @@ jobs:
               - 'jtf/src/jtf/ml/warehouse.py'
               - 'jtf/src/jtf/ci.py'
               - 'jtf/src/jtf/cli/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.github/workflows/ci.yml'
+            e2e:
+              - 'e2e_tests/**'
+              - 'jtf/**'
+              - 'warehouse/dbt/**'
               - 'pyproject.toml'
               - 'uv.lock'
               - '.github/workflows/ci.yml'
@@ -119,5 +128,53 @@ jobs:
         env:
           JTF_DBT_COMPILED: warehouse/dbt/target/rules
       - name: Drop the run's datasets
+        if: always()
+        run: uv run jtf ci drop
+
+  # The time machine's guarantees (e2e_tests/README.md): a world of real raw files, committed in
+  # e2e_tests/world, parsed into the run's own datasets and built by dbt, then replayed. It reads
+  # no other data, so like the warehouse job it needs no read on any real dataset.
+  e2e:
+    needs: changes
+    # A pull request from a fork gets no identity token, so it can't reach GCP: skip, don't fail.
+    if: >-
+      needs.changes.outputs.e2e == 'true' && (github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: e2e-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      JTF_BIGQUERY_PROJECT: ${{ vars.GCP_DEV_PROJECT }}
+      JTF_BIGQUERY_LOCATION: ${{ vars.GCP_REGION }}
+      # Not the warehouse job's prefix, which runs beside it
+      JTF_DBT_DATASET_PREFIX: ci_${{ github.run_id }}_${{ github.run_attempt }}_e2e
+    steps:
+      - name: Check the repository variables are set
+        run: |
+          for name in GCP_DEV_PROJECT GCP_REGION GCP_WORKLOAD_IDENTITY_PROVIDER GCP_CI_DEV_SERVICE_ACCOUNT; do
+            if [ -z "${!name}" ]; then echo "::error::Repository variable $name is not set"; exit 1; fi
+          done
+        env:
+          GCP_DEV_PROJECT: ${{ vars.GCP_DEV_PROJECT }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_CI_DEV_SERVICE_ACCOUNT: ${{ vars.GCP_CI_DEV_SERVICE_ACCOUNT }}
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.13.7"
+      - run: uv sync --frozen
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_DEV_SERVICE_ACCOUNT }}
+      # The tests make the run's datasets, load the world and drop them after
+      - name: The e2e tests, on their world
+        run: uv run pytest e2e_tests
+      - name: Drop the run's datasets, if the tests could not
         if: always()
         run: uv run jtf ci drop

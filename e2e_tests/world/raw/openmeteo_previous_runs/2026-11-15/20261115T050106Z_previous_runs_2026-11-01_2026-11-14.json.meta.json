@@ -1,0 +1,37 @@
+{
+ "source": "openmeteo_previous_runs",
+ "filename": "previous_runs_2026-11-01_2026-11-14.json",
+ "load_type": "initial",
+ "url": "https://previous-runs-api.open-meteo.com/v1/forecast",
+ "method": "GET",
+ "params": {
+  "latitude": "35.69,35.44,35.86,35.61,36.37,36.56,36.39,35.66,35.1",
+  "longitude": "139.69,139.64,139.65,140.12,140.47,139.88,139.06,138.57,138.86",
+  "hourly": "shortwave_radiation,shortwave_radiation_previous_day1,shortwave_radiation_previous_day2,direct_radiation,direct_radiation_previous_day1,direct_radiation_previous_day2,diffuse_radiation,diffuse_radiation_previous_day1,diffuse_radiation_previous_day2,cloud_cover,cloud_cover_previous_day1,cloud_cover_previous_day2,temperature_2m,temperature_2m_previous_day1,temperature_2m_previous_day2,wind_speed_10m,wind_speed_10m_previous_day1,wind_speed_10m_previous_day2",
+  "models": "jma_msm,jma_gsm,ecmwf_ifs025",
+  "start_date": "2026-11-01",
+  "end_date": "2026-11-14"
+ },
+ "form": {},
+ "if_modified_since": null,
+ "fetched_at": "2026-11-15T05:01:06.480239+00:00",
+ "fetched_at_jst": "2026-11-15T14:01:06.480239+09:00",
+ "extraction_date": "2026-11-15",
+ "http_status": 200,
+ "response_headers": {
+  "date": "Sun, 15 Nov 2026 05:01:05 GMT",
+  "content-type": "application/json; charset=utf-8",
+  "transfer-encoding": "chunked",
+  "connection": "keep-alive",
+  "x-ratelimit-cost": "48.600006",
+  "x-ratelimit-limit": "600.0",
+  "x-ratelimit-remaining": "443.7857",
+  "x-ratelimit-reset": "1794718900",
+  "x-ratelimit-window": "60",
+  "content-encoding": "deflate"
+ },
+ "size_bytes": 812728,
+ "sha256": "6eb59a7814e734d4a9bcdd98fd45d389f9a90af3b0b2fc28c615e02be386b486",
+ "jtf_version": "0.1.0",
+ "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:df1e00fe25d91d74f54caa2e88b926b7fae3fb8e738bf0b826c1ec4b7d5d6b95"
+}

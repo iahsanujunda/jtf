@@ -33,6 +33,11 @@ def git_state() -> dict[str, str]:
     return {"git_commit": commit, "git_dirty": str(bool(changes)).lower()}
 
 
+def run_code() -> dict[str, str]:
+    """The code a run comes from: its git commit, whether the tree was clean, its image digest."""
+    return {**git_state(), "image_digest": os.environ.get("JTF_IMAGE_DIGEST", "")}
+
+
 def log_backtest(
     *,
     run_id: str,
@@ -41,6 +46,7 @@ def log_backtest(
     last_month: date,
     per_fold: pd.DataFrame,
     overall: dict[str, float],
+    fidelity: dict[str, int],
 ) -> str:
     """One MLflow run per model per backtest: the overall metrics, each metric per fold as a step
     (MLflow draws them over the folds), and the table of folds. Returns MLflow's run ID."""
@@ -71,6 +77,8 @@ def log_backtest(
                 "last_test_month": last_month.isoformat(),
                 "folds": len(per_fold),
                 "slots_scored": "daylight, labelled",
+                "exact_decision_times": fidelity["exact"],
+                "approximate_decision_times": fidelity["approximate"],
             }
         )
         mlflow.log_metrics(overall)

@@ -5,7 +5,9 @@ dbt then builds every model on them with `--empty` and runs the unit tests.
 
 Each run has its own prefix, `ci_<run id>[_<attempt>]`, so a cancelled run's cleanup never drops a
 newer run's tables, and every table expires after a day in case a run dies before its cleanup.
-Only such a prefix can be dropped: never `dev`, never a person's datasets.
+The e2e tests' world, which loads real raw files into the same kind of datasets, has its own:
+`ci_<run id>[_<attempt>]_e2e`. Only such a prefix can be dropped: never `dev`, never a person's
+datasets.
 """
 
 import re
@@ -22,13 +24,15 @@ from jtf.parse.load import MANIFEST, MANIFEST_COLUMNS
 LAYERS = ("ods", "dim", "dwd", "dws", "ads")
 EXPIRY = timedelta(days=1)
 LABELS = {"purpose": "ci"}
-PREFIX = re.compile(r"ci_\d+(_\d+)?")
+PREFIX = re.compile(r"ci_\d+(_\d+)?(_e2e)?")
 
 
 def ci_prefix(prefix: str) -> str:
     """The prefix, if it names a CI run's datasets; anything else is refused."""
     if not PREFIX.fullmatch(prefix):
-        raise ValueError(f"not a CI run's prefix: {prefix!r}; expected ci_<run id>[_<attempt>]")
+        raise ValueError(
+            f"not a CI run's prefix: {prefix!r}; expected ci_<run id>[_<attempt>][_e2e]"
+        )
     return prefix
 
 

@@ -1,0 +1,41 @@
+{
+ "source": "meti_fit_capacity",
+ "filename": "B_city202506.xlsx",
+ "load_type": "initial",
+ "url": "https://www.fit-portal.go.jp/servlet/servlet.FileDownload",
+ "method": "GET",
+ "params": {
+  "file": "015IT00000AzDwW"
+ },
+ "form": {},
+ "if_modified_since": null,
+ "fetched_at": "2026-11-16T00:43:12.720931+00:00",
+ "fetched_at_jst": "2026-11-16T09:43:12.720931+09:00",
+ "extraction_date": "2026-11-16",
+ "http_status": 200,
+ "gap": false,
+ "response_headers": {
+  "date": "Mon, 16 Nov 2026 00:43:12 GMT",
+  "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; charset=UTF-8",
+  "content-length": "1766218",
+  "connection": "keep-alive",
+  "vary": "Accept-Encoding",
+  "content-disposition": "inline; filename=\"B_city202506.xlsx\"",
+  "permissions-policy": "unload=*",
+  "last-modified": "Tue, 09 Dec 2025 04:37:03 +0000",
+  "x-sfdc-trace-flags": "01",
+  "cache-control": "private",
+  "content-security-policy": "upgrade-insecure-requests",
+  "x-content-type-options": "nosniff",
+  "strict-transport-security": "max-age=63072000; includeSubDomains",
+  "server": "sfdcedge",
+  "x-sfdc-request-id": "c6873489376c236cb2c35e161167fcb0",
+  "x-request-id": "c6873489376c236cb2c35e161167fcb0",
+  "x-sfdc-edge-cache": "none"
+ },
+ "size_bytes": 38442,
+ "sha256": "b3a9af28c7e830e015c21b5010eb2c2143f135c5559a46ea4e2fe08e70b22b15",
+ "jtf_version": "0.1.0",
+ "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:78265ffb106e7518f6f36cb8e7591bd57b27061084e6994f8f5b8ef85fde6b55",
+ "cut": "for the e2e world: header rows, 静岡県 and 合計 only; the original's sha256 8f1b5e85a22437ea820c7550d5bbcba32cf8c1b9593f0fe7febb892b35b630fc"
+}

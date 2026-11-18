@@ -1,0 +1,38 @@
+{
+ "source": "openmeteo_previous_runs",
+ "filename": "previous_runs_2026-11-01_2026-11-15.json",
+ "load_type": "initial",
+ "url": "https://previous-runs-api.open-meteo.com/v1/forecast",
+ "method": "GET",
+ "params": {
+  "latitude": "35.69,35.44,35.86,35.61,36.37,36.56,36.39,35.66,35.1",
+  "longitude": "139.69,139.64,139.65,140.12,140.47,139.88,139.06,138.57,138.86",
+  "hourly": "shortwave_radiation,shortwave_radiation_previous_day1,shortwave_radiation_previous_day2,direct_radiation,direct_radiation_previous_day1,direct_radiation_previous_day2,diffuse_radiation,diffuse_radiation_previous_day1,diffuse_radiation_previous_day2,cloud_cover,cloud_cover_previous_day1,cloud_cover_previous_day2,temperature_2m,temperature_2m_previous_day1,temperature_2m_previous_day2,wind_speed_10m,wind_speed_10m_previous_day1,wind_speed_10m_previous_day2",
+  "models": "jma_msm,jma_gsm,ecmwf_ifs025",
+  "start_date": "2026-11-01",
+  "end_date": "2026-11-15"
+ },
+ "form": {},
+ "if_modified_since": null,
+ "fetched_at": "2026-11-16T12:29:54.176374+00:00",
+ "fetched_at_jst": "2026-11-16T21:29:54.176374+09:00",
+ "extraction_date": "2026-11-16",
+ "http_status": 200,
+ "gap": false,
+ "response_headers": {
+  "date": "Mon, 16 Nov 2026 12:29:53 GMT",
+  "content-type": "application/json; charset=utf-8",
+  "transfer-encoding": "chunked",
+  "connection": "keep-alive",
+  "x-ratelimit-cost": "52.071423",
+  "x-ratelimit-limit": "600.0",
+  "x-ratelimit-remaining": "547.9286",
+  "x-ratelimit-reset": "1794832253",
+  "x-ratelimit-window": "60",
+  "content-encoding": "deflate"
+ },
+ "size_bytes": 867791,
+ "sha256": "1567aea60fa391e65d61375b12b8c9a6def4b2bc59a96a1a50deb88d81a944cd",
+ "jtf_version": "0.1.0",
+ "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:78265ffb106e7518f6f36cb8e7591bd57b27061084e6994f8f5b8ef85fde6b55"
+}

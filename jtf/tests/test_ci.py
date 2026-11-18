@@ -69,7 +69,17 @@ def test_drop_removes_every_layer_of_the_run():
     assert client.deleted == [f"p.ci_123_{layer}" for layer in LAYERS]
 
 
-@pytest.mark.parametrize("prefix", ["dev", "pr_15", "ci_", "ci_abc", "ci_123_dev", "dev_ci_123"])
+def test_the_e2e_tests_world_has_a_prefix_of_its_own():
+    client = FakeClient()
+    create(client, "p", "asia-northeast1", "ci_123_1_e2e")
+    drop(client, "p", "ci_123_1_e2e")
+    assert set(client.datasets) == {f"ci_123_1_e2e_{layer}" for layer in LAYERS}
+    assert client.deleted == [f"p.ci_123_1_e2e_{layer}" for layer in LAYERS]
+
+
+@pytest.mark.parametrize(
+    "prefix", ["dev", "pr_15", "ci_", "ci_abc", "ci_123_dev", "dev_ci_123", "ci_123_e2e_dev"]
+)
 def test_only_a_ci_runs_prefix_is_ever_created_or_dropped(prefix):
     client = FakeClient()
     with pytest.raises(ValueError, match="not a CI run's prefix"):
