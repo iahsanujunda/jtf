@@ -11,7 +11,6 @@ So the lineage runs from raw files through DWS to the metrics. Folds, the models
 metrics are functions in jtf.ml; these assets only wire them to BigQuery and MLflow.
 """
 
-import os
 from datetime import UTC, date, datetime
 
 import dagster as dg
@@ -26,7 +25,7 @@ from jtf.ml.backtest import (
     month,
 )
 from jtf.ml.replay import Mismatch, Refused, reproduce, run, target_day
-from jtf.ml.tracking import git_state, log_backtest
+from jtf.ml.tracking import log_backtest, run_code
 from jtf.orchestration.resources import Datasets
 
 PREDICTIONS = dg.AssetKey(["ads", "ads_prediction_solar"])
@@ -47,11 +46,6 @@ class RunConfig(dg.Config):
     """A reproduce's original run ID."""
     fault: str | None = None
     """A fault to inject; none exist until step 8."""
-
-
-def code() -> dict[str, str]:
-    """The code a run comes from: its git commit and whether the tree was clean, its image."""
-    return {**git_state(), "image_digest": os.environ.get("JTF_IMAGE_DIGEST", "")}
 
 
 def _days(config: RunConfig, warehouse) -> tuple[date, date]:
@@ -86,7 +80,7 @@ def solar_predictions(
             if not config.reproduces:
                 raise Refused("a reproduce needs the run it reproduces")
             record = reproduce(
-                warehouse, run_id=run_id, original=config.reproduces, code=code(), now=now
+                warehouse, run_id=run_id, original=config.reproduces, code=run_code(), now=now
             )
         else:
             first, last = _days(config, warehouse)
@@ -97,7 +91,7 @@ def solar_predictions(
                 model=config.model,
                 first_day=first,
                 last_day=last,
-                code=code(),
+                code=run_code(),
                 now=now,
                 fault=config.fault,
             )
@@ -155,3 +149,18 @@ def solar_backtest_metrics(
 
 
 ML_ASSETS = [solar_predictions, solar_backtest_metrics]
+
+# Launched by name with their config: a replay (a what-if or a reproduce) and a backtest, scored
+METRICS = dg.AssetKey(["ml", "solar_backtest_metrics"])
+REPLAY = dg.define_asset_job(
+    "replay",
+    selection=dg.AssetSelection.assets(PREDICTIONS, OUTCOMES),
+    description="A what-if run over target days, or a reproduce of an earlier run",
+    config={"ops": {solar_predictions.op.name: {"config": {"mode": "what-if"}}}},
+)
+BACKTEST = dg.define_asset_job(
+    "backtest",
+    selection=dg.AssetSelection.assets(PREDICTIONS, OUTCOMES, METRICS),
+    description="The rolling backtest over test months, its metrics logged to MLflow",
+)
+ML_JOBS = [REPLAY, BACKTEST]

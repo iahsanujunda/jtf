@@ -33,6 +33,11 @@ def git_state() -> dict[str, str]:
     return {"git_commit": commit, "git_dirty": str(bool(changes)).lower()}
 
 
+def run_code() -> dict[str, str]:
+    """The code a run comes from: its git commit, whether the tree was clean, its image digest."""
+    return {**git_state(), "image_digest": os.environ.get("JTF_IMAGE_DIGEST", "")}
+
+
 def log_backtest(
     *,
     run_id: str,

@@ -261,3 +261,62 @@ def ods_verify(
         ok = ok and verification.ok
     if not ok:
         raise typer.Exit(code=1)
+
+
+DatasetPrefix = Annotated[
+    str, typer.Option(envvar="JTF_DBT_DATASET_PREFIX", help="dbt's datasets: <prefix>_<layer>.")
+]
+
+
+@app.command()
+def replay(
+    project: Project,
+    location: Location,
+    prefix: DatasetPrefix,
+    first: Annotated[str | None, typer.Option("--from", help="First target day.")] = None,
+    last: Annotated[str | None, typer.Option("--to", help="Last target day.")] = None,
+    model: Annotated[str, typer.Option(help="The model to run.")] = "persistence_d2",
+    original: Annotated[
+        str | None, typer.Option("--reproduce", help="An earlier run's ID, run again to match.")
+    ] = None,
+) -> None:
+    """The time machine: a what-if run of a model over target days (--from, --to, YYYY-MM-DD),
+    or a reproduce of an earlier run (--reproduce), which must match it exactly. Each run is
+    recorded in ads_runs."""
+    if bool(original) == bool(first or last) or (not original and not (first and last)):
+        raise typer.BadParameter(
+            "give --from and --to for a what-if, or --reproduce for a reproduce"
+        )
+    from datetime import UTC, date, datetime
+    from uuid import uuid4
+
+    from jtf.ml.replay import Mismatch, Refused, reproduce, run
+    from jtf.ml.tracking import run_code
+    from jtf.ml.warehouse import BacktestWarehouse
+
+    warehouse, run_id = BacktestWarehouse(project, location, prefix), f"cli-{uuid4()}"
+    now = lambda: datetime.now(UTC)  # noqa: E731
+    try:
+        if original:
+            record = reproduce(
+                warehouse, run_id=run_id, original=original, code=run_code(), now=now
+            )
+        else:
+            record = run(
+                warehouse,
+                run_id=run_id,
+                mode="what-if",
+                model=model,
+                first_day=date.fromisoformat(first),
+                last_day=date.fromisoformat(last),
+                code=run_code(),
+                now=now,
+            )
+    except (Refused, Mismatch) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(
+        f"{record['run_id']}: {record['mode']} of {record['model']}, "
+        f"{record['decision_times']} decision times ({record['exact']} exact), "
+        f"inputs {record['inputs_fingerprint']}, outputs {record['outputs_fingerprint']}"
+    )

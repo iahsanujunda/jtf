@@ -8,7 +8,14 @@ from jtf.ingest.landed import SIDECAR
 from jtf.ingest.sources import SOURCES
 from jtf.orchestration.dbt import DBT_PROJECT, REBUILD_ON_UPDATE, dbt_models
 from jtf.orchestration.definitions import defs
-from jtf.orchestration.ml import OUTCOMES, PREDICTIONS, solar_backtest_metrics, solar_predictions
+from jtf.orchestration.ml import (
+    BACKTEST,
+    OUTCOMES,
+    PREDICTIONS,
+    REPLAY,
+    solar_backtest_metrics,
+    solar_predictions,
+)
 from jtf.orchestration.ods import (
     FILE_CHECKS,
     MANIFEST_KEY,
@@ -250,3 +257,16 @@ def test_models_wait_for_the_whole_parse_not_its_first_step():
 
     assert seen == [set()]  # the manifest was updated, but the parse was still running
     assert s.requested() == {s.model_key, s.spine_key}  # then both, together
+
+
+def test_a_replay_and_a_backtest_are_jobs_with_their_assets():
+    graph = defs.resolve_asset_graph()
+    assert {defs.resolve_job_def(n).name for n in ("replay", "backtest")} == {"replay", "backtest"}
+
+    assert REPLAY.selection.resolve(graph) == {PREDICTIONS, OUTCOMES}
+    assert BACKTEST.selection.resolve(graph) == {
+        PREDICTIONS,
+        OUTCOMES,
+        dg.AssetKey(["ml", "solar_backtest_metrics"]),
+    }
+    assert REPLAY.config["ops"][solar_predictions.op.name]["config"]["mode"] == "what-if"

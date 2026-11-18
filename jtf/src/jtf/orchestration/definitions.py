@@ -3,7 +3,7 @@
 import dagster as dg
 
 from jtf.orchestration.dbt import DBT, dbt_models
-from jtf.orchestration.ml import ML_ASSETS
+from jtf.orchestration.ml import ML_ASSETS, ML_JOBS
 from jtf.orchestration.ods import MANIFEST_SPEC, ODS_ASSETS
 from jtf.orchestration.raw import RAW_ASSETS, raw_bucket_sensor
 from jtf.orchestration.resources import BigQuery, Datasets, RawBucket
@@ -18,6 +18,7 @@ automation = dg.AutomationConditionSensorDefinition(
 
 defs = dg.Definitions(
     assets=[*RAW_ASSETS, *ODS_ASSETS, MANIFEST_SPEC, dbt_models, *ML_ASSETS],
+    jobs=ML_JOBS,
     sensors=[raw_bucket_sensor, automation],
     resources={
         "raw_bucket": RawBucket(url=dg.EnvVar("JTF_RAW_URL")),
