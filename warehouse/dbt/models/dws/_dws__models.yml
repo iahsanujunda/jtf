@@ -445,3 +445,28 @@ unit_tests:
         - {slot_start: "2026-11-15 15:00:00+00", model: ecmwf_ifs025, source: single_runs, run_time: "2026-11-14 12:00:00+00", ghi_w_m2: 0, temperature_c: 14}
         - {slot_start: "2026-11-16 03:00:00+00", model: jma_gsm, source: single_runs, run_time: "2026-11-14 12:00:00+00", ghi_w_m2: null, temperature_c: 14}
         - {slot_start: "2026-11-15 15:00:00+00", model: jma_gsm, source: single_runs, run_time: "2026-11-14 12:00:00+00", ghi_w_m2: null, temperature_c: 14}
+
+  - name: the_spine_runs_to_the_day_after_the_newest_capture_in_jst
+    description: >
+      The newest capture is the 08:45 JST capture of 17 November (23:45 UTC on the 16th): target
+      day 18 November exists, with T at 09:00 JST on the 17th, and nothing after it. Its date is
+      taken in JST: in UTC it would be the 16th and the 18th would be missing. With the first target
+      day set to the 18th, that is one day of 48 slots.
+    model: dws_decision_slots
+    overrides:
+      vars: {first_target_day: "2026-11-18"}
+    given:
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: tepco_actuals, known_at: "2026-11-15 23:45:00+00"}
+          - {source: openmeteo_live, known_at: "2026-11-16 23:45:00+00"}
+    expect:
+      format: sql
+      rows: |
+        select
+            timestamp '2026-11-17 00:00:00+00' as decision_time,
+            date '2026-11-18' as target_day,
+            slot_code,
+            timestamp_add(timestamp '2026-11-17 15:00:00+00', interval 30 * (slot_code - 1) minute) as slot_start
+        from unnest(generate_array(1, 48)) as slot_code
+

@@ -8,9 +8,9 @@
 {{ config(cluster_by=['measure', 'slot_start']) }}
 
 with capture_start as (
-    select min(fetched_at) as t
-    from {{ source('ods', 'raw_files') }}
-    where source = 'tepco_actuals' and load_type = 'daily'
+    select min(known_at) as t
+    from {{ ref('dwd_source_captures') }}
+    where source = 'tepco_actuals'
 ),
 
 -- A re-parse appends a file's rows again under a new parser_version: read each file as last parsed.

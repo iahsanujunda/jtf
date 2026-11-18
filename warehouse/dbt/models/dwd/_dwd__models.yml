@@ -414,6 +414,29 @@ models:
           arguments:
             expression: ghi_w_m2 >= 0 and cloud_cover_pct between 0 and 100
 
+  - name: dwd_source_captures
+    description: >
+      Every daily capture, one row per source and raw file fetched, known when it was fetched:
+      where each versioned model takes its capture start from, and the spine its newest capture.
+    columns:
+      - name: source
+        data_tests: [not_null]
+      - name: source_file
+        description: The raw file's path.
+        data_tests: [not_null]
+      - name: known_at
+        description: The fetch.
+        data_tests: [not_null]
+      - name: known_until
+        description: Always null; a capture is a fact of its own, never a version of another.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [source, source_file, fetched_at]
+      - expression_is_true:
+          arguments:
+            expression: known_at = fetched_at and known_until is null
+
 unit_tests:
   # Times are UTC; JST is UTC+9. Capture start is the 08:45 JST daily capture of 2026-11-15
   # (2026-11-14 23:45 UTC). Slot A, 12:00 JST on 2026-11-14, has rule time 13:30 JST (04:30 UTC).
@@ -425,10 +448,10 @@ unit_tests:
       last parsed, so the wrong value never becomes a version, and every known_at stays the rule's.
     model: dwd_tepco_actuals
     given:
-      - input: source('ods', 'raw_files')
+      - input: ref('dwd_source_captures')
         rows:
-          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-14 23:45:00+00"}
-          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-15 23:45:00+00"}
+          - {source: tepco_actuals, known_at: "2026-11-14 23:45:00+00"}
+          - {source: tepco_actuals, known_at: "2026-11-15 23:45:00+00"}
       - input: source('ods', 'tepco_actuals')
         rows:
           - {source_file: f1, date: "2026/11/14", time: "12:00", solar: 500, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-14 23:45:00+00", ingested_at: "2026-11-15 00:00:00+00", parser_version: "1"}
@@ -447,10 +470,10 @@ unit_tests:
       was fetched, and it ends the first version there.
     model: dwd_tepco_actuals
     given:
-      - input: source('ods', 'raw_files')
+      - input: ref('dwd_source_captures')
         rows:
-          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-14 23:45:00+00"}
-          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-15 23:45:00+00"}
+          - {source: tepco_actuals, known_at: "2026-11-14 23:45:00+00"}
+          - {source: tepco_actuals, known_at: "2026-11-15 23:45:00+00"}
       - input: source('ods', 'tepco_actuals')
         rows:
           - {source_file: f1, date: "2026/11/14", time: "12:00", solar: 5000, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-14 23:45:00+00", ingested_at: "2026-11-15 00:00:00+00", parser_version: "1"}
@@ -470,11 +493,9 @@ unit_tests:
       capture start; its rule time falls before capture start, so it keeps the rule.
     model: dwd_tepco_actuals
     given:
-      - input: source('ods', 'raw_files')
+      - input: ref('dwd_source_captures')
         rows:
-          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-14 23:45:00+00"}
-          - {source: tepco_actuals, load_type: recapture, fetched_at: "2026-11-15 05:02:00+00"}
-          - {source: tepco_actuals, load_type: initial, fetched_at: "2026-11-15 01:00:00+00"}
+          - {source: tepco_actuals, known_at: "2026-11-14 23:45:00+00"}
       - input: source('ods', 'tepco_actuals')
         rows:
           - {source_file: f2, date: "2026/11/15", time: "12:30", solar: 6000, solar_curtailed: 0, wind: 200, fetched_at: "2026-11-15 05:02:00+00", ingested_at: "2026-11-15 06:00:00+00", parser_version: "1"}
@@ -488,18 +509,17 @@ unit_tests:
         - {slot_start: "2024-03-01 03:00:00+00", measure: solar_curtailed, value_mw: 0, known_at: "2024-03-01 04:30:00+00", known_until: null, basis: rule, correction: false}
         - {slot_start: "2024-03-01 03:00:00+00", measure: wind, value_mw: 50, known_at: "2024-03-01 04:30:00+00", known_until: null, basis: rule, correction: false}
 
-  - name: capture_start_is_the_sources_own_first_daily_capture
+  - name: capture_start_is_the_sources_own_first_capture
     description: >
-      JEPX's daily capture started earlier (2026-11-10), and an initial TEPCO load was fetched on
-      2026-11-13. Neither moves TEPCO's capture start: if either did, slot A (rule time 13:30 JST on
-      2026-11-14) would fall after it and take its fetch time instead of the rule.
+      JEPX's daily capture started earlier (2026-11-10). It doesn't move TEPCO's capture start: if
+      it did, slot A (rule time 13:30 JST on 2026-11-14) would fall after it and take its fetch time
+      instead of the rule. (That an initial load is no capture is dwd_source_captures' own test.)
     model: dwd_tepco_actuals
     given:
-      - input: source('ods', 'raw_files')
+      - input: ref('dwd_source_captures')
         rows:
-          - {source: jepx_spot, load_type: daily, fetched_at: "2026-11-10 02:00:00+00"}
-          - {source: tepco_actuals, load_type: initial, fetched_at: "2026-11-13 01:00:00+00"}
-          - {source: tepco_actuals, load_type: daily, fetched_at: "2026-11-14 23:45:00+00"}
+          - {source: jepx_spot, known_at: "2026-11-10 02:00:00+00"}
+          - {source: tepco_actuals, known_at: "2026-11-14 23:45:00+00"}
       - input: source('ods', 'tepco_actuals')
         rows:
           - {source_file: f1, date: "2026/11/14", time: "12:00", solar: 5000, solar_curtailed: 0, wind: 100, fetched_at: "2026-11-14 23:45:00+00", ingested_at: "2026-11-15 00:00:00+00", parser_version: "1"}
@@ -527,6 +547,9 @@ unit_tests:
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Tue, 18 Aug 2026 04:45:00 +0000"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202006.xlsx, status: parsed, fetched_at: "2026-11-16 00:44:00+00", last_modified: "Tue, 10 Nov 2020 01:00:00 +0000"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202006.xlsx, status: parsed, fetched_at: "2026-11-16 00:45:00+00", last_modified: "Tue, 05 Oct 2021 06:00:00 +0000"}
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: meti_fit_capacity, known_at: "2026-11-16 23:45:00+00"}
       - input: source('ods', 'meti_fit_notices')
         rows:
           - {source_file: w1, ref_date: "2020-06-30", announced: "2020-11-10", source_time: "2020-12-01 00:00:00+00", fetched_at: "2026-11-16 00:10:00+00", ingested_at: "2026-11-16 01:00:00+00"}
@@ -548,6 +571,9 @@ unit_tests:
           - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref201706.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Tue, 06 Feb 2024 03:00:00 +0000"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city201706.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Tue, 06 Feb 2024 03:10:00 +0000"}
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: meti_fit_capacity, known_at: "2026-11-16 23:45:00+00"}
       - input: source('ods', 'meti_fit_notices')
         rows:
           - {source_file: w1, ref_date: "2018-03-31", announced: "2018-08-01", source_time: "2018-09-01 00:00:00+00", fetched_at: "2026-11-16 00:10:00+00", ingested_at: "2026-11-16 01:00:00+00"}
@@ -568,6 +594,9 @@ unit_tests:
           - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202303.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Mon, 31 Jul 2023 02:00:00 +0000"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202303.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Mon, 31 Jul 2023 02:10:00 +0000"}
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: meti_fit_capacity, known_at: "2026-11-16 23:45:00+00"}
       - input: source('ods', 'meti_fit_notices')
         rows:
           - {source_file: w1, ref_date: "2023-03-31", announced: "2023-08-01", source_time: "2023-09-01 00:00:00+00", fetched_at: "2026-11-17 01:00:00+00", ingested_at: "2026-11-17 02:00:00+00"}
@@ -589,6 +618,12 @@ unit_tests:
           - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_capacity_pref, filename: A_pref202606.xlsx, status: parsed, fetched_at: "2026-12-10 23:45:30+00", last_modified: "Wed, 09 Dec 2026 05:00:00 +0000"}
           - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_capacity_city, filename: B_city202606.xlsx, status: parsed, fetched_at: "2026-12-11 23:45:30+00", last_modified: "Fri, 11 Dec 2026 01:00:00 +0000"}
           - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_capacity_pref, filename: A_pref202609.xlsx, status: parsed, fetched_at: "2027-02-10 23:45:30+00", last_modified: "Wed, 10 Feb 2027 01:00:00 +0000"}
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: meti_fit_capacity, known_at: "2026-11-16 23:45:00+00"}
+          - {source: meti_fit_capacity, known_at: "2026-12-10 23:45:30+00"}
+          - {source: meti_fit_capacity, known_at: "2026-12-11 23:45:30+00"}
+          - {source: meti_fit_capacity, known_at: "2027-02-10 23:45:30+00"}
       - input: source('ods', 'meti_fit_notices')
         rows:
           - {source_file: d1, ref_date: "2026-06-30", announced: "2026-12-10", source_time: null, fetched_at: "2026-12-10 23:45:00+00", ingested_at: "2026-12-11 00:00:00+00"}
@@ -610,6 +645,10 @@ unit_tests:
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Tue, 18 Aug 2026 04:42:27 +0000", parser_version: "2"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Tue, 18 Aug 2026 04:45:00 +0000"}
           - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_capacity_pref, filename: A_pref202603.xlsx, status: parsed, fetched_at: "2026-12-01 23:45:30+00", last_modified: "Mon, 30 Nov 2026 02:00:00 +0000"}
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: meti_fit_capacity, known_at: "2026-11-16 23:45:00+00"}
+          - {source: meti_fit_capacity, known_at: "2026-12-01 23:45:30+00"}
       - input: source('ods', 'meti_fit_notices')
         rows:
           - {source_file: w2, ref_date: "2026-03-31", announced: "2026-08-20", source_time: "2026-09-01 00:00:00+00", fetched_at: "2026-11-16 00:11:00+00", ingested_at: "2026-11-16 01:00:00+00"}
@@ -628,6 +667,9 @@ unit_tests:
           - {source: meti_fit_capacity, load_type: daily, ods_table: meti_fit_notices, filename: PublicInfoSummary.html, status: parsed, fetched_at: "2026-11-16 23:45:00+00"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_pref, filename: A_pref202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:42:00+00", last_modified: "Tue, 18 Aug 2026 04:42:27 +0000"}
           - {source: meti_fit_capacity, load_type: initial, ods_table: meti_fit_capacity_city, filename: B_city202603.xlsx, status: parsed, fetched_at: "2026-11-16 00:43:00+00", last_modified: "Tue, 18 Aug 2026 04:45:00 +0000"}
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: meti_fit_capacity, known_at: "2026-11-16 23:45:00+00"}
       - input: source('ods', 'meti_fit_notices')
         rows:
           - {source_file: w2, ref_date: "2026-03-31", announced: "2026-08-25", source_time: "2026-09-01 00:00:00+00", fetched_at: "2026-11-16 00:11:00+00", ingested_at: "2026-11-16 01:00:00+00", parser_version: "1"}
@@ -875,3 +917,21 @@ unit_tests:
         - {slot_start: "2026-11-09 22:30:00+00", ghi_w_m2: 60, temperature_c: 11.25, known_at: "2026-11-16 03:00:00+00", known_until: null, basis: captured}
         - {slot_start: "2026-11-09 23:00:00+00", ghi_w_m2: 185, temperature_c: 11.5, known_at: "2026-11-08 03:00:00+00", known_until: null, basis: rule}
         - {slot_start: "2026-11-09 23:30:00+00", ghi_w_m2: 185, temperature_c: 12.5, known_at: "2026-11-08 03:00:00+00", known_until: null, basis: rule}
+
+  - name: a_capture_is_a_daily_fetch_counted_once
+    description: >
+      A daily file fed two ODS tables and was parsed twice: one capture. An initial load and a
+      monthly re-capture are not daily captures, so neither counts, however early they came.
+    model: dwd_source_captures
+    given:
+      - input: source('ods', 'raw_files')
+        rows:
+          - {source: tepco_actuals, path: a/1.csv, load_type: daily, ods_table: t1, parser_version: "1", extraction_date: "2026-11-15", fetched_at: "2026-11-14 23:45:00+00"}
+          - {source: tepco_actuals, path: a/1.csv, load_type: daily, ods_table: t2, parser_version: "1", extraction_date: "2026-11-15", fetched_at: "2026-11-14 23:45:00+00"}
+          - {source: tepco_actuals, path: a/1.csv, load_type: daily, ods_table: t1, parser_version: "2", extraction_date: "2026-11-15", fetched_at: "2026-11-14 23:45:00+00"}
+          - {source: tepco_actuals, path: a/0.csv, load_type: initial, ods_table: t1, parser_version: "1", extraction_date: "2026-11-13", fetched_at: "2026-11-13 01:00:00+00"}
+          - {source: tepco_actuals, path: a/2.csv, load_type: recapture, ods_table: t1, parser_version: "1", extraction_date: "2026-12-01", fetched_at: "2026-12-01 00:30:00+00"}
+    expect:
+      rows:
+        - {source: tepco_actuals, source_file: a/1.csv, known_at: "2026-11-14 23:45:00+00", known_until: null}
+
