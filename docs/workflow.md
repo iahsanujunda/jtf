@@ -21,14 +21,14 @@ The standard for everyone who changes this repository, people and agents alike: 
 
 1. One parser per file layout ([parse](../jtf/src/jtf/parse/README.md)): it changes the format, never the meaning. Offline tests on fixtures cut from real raw files
 2. **Prove it on every raw file** of its source with `jtf parse` into dev ODS, with Dagster stopped
-3. **Then orchestrate it** by listing its table in `ORCHESTRATED` ([ods.py](../jtf/src/jtf/orchestration/ods.py)). Changing what a parser writes bumps its `VERSION`: the new rows are appended under it, and ODS is never updated
+3. **Then orchestrate it** by listing its table in `ORCHESTRATED` ([ods.py](../jtf/src/jtf/orchestration/ods.py)). Changing what a parser writes bumps its `VERSION`: the new rows are appended under it, and ODS is never updated. Each load records its files' fingerprints, and the asset's `rows_as_loaded` check fails if a file's rows change afterwards
 
 ## A warehouse model (settled)
 
 Read the plan's paragraph for the layer first: units and names come from the plan, not from the source. Write exploratory SQL the way dbt will run it, so a finding moves into a model without a rewrite.
 
 - **DWD** ([dwd](../warehouse/dbt/models/dwd/README.md)): power in MW, slots by their start in JST, every version with `known_at`, `known_until` and `basis`. `known_at` is proven by unit tests: a late backfill, capture start, the same value seen again, a correction, a re-parse. It is also checked on real data after every load: a `rule` version before its source's capture start, and never dated after the fetch that first held it; a `captured` version never known before the fetch that held it; no `known_at` after the sources' newest fetch
-- **DWS** ([dws](../warehouse/dbt/models/dws/README.md)): versioned DWD only through `as_of`, DIM directly. A feature earns its place in a notebook first (from 07 on, reading the models through `as_of`); then its logic lives only in dbt, never in pandas. Features are append-only: changing what one means adds a column
+- **DWS** ([dws](../warehouse/dbt/models/dws/README.md)): versioned DWD only through `as_of`, DIM directly. A feature earns its place in a notebook first (from 08 on, reading the models through `as_of`); then its logic lives only in dbt, never in pandas. Features are append-only: changing what one means adds a column
 - **Any model:** a sum that is compared or versioned is exact (`NUMERIC`, or terms in a fixed order). An incremental model equals a full build, row for row, and its cost is read from BigQuery's job history. Every BigQuery call names the project
 - **The rules** ([rules](../warehouse/dbt/rules/README.md)): layers read only downward, DWS reads versioned DWD through `as_of`, and nothing reads the clock. `make test` runs what needs no BigQuery, `make rules` runs all of them, and CI runs them on every pull request that touches the warehouse
 
@@ -55,6 +55,7 @@ Labels and outcomes are dbt models and predictions are appended by `jtf.ml` unde
 
 - **A capture failed or is late:** its health check says so. Run the job again (`gcloud run jobs execute`); a capture seen again adds no version, so a rerun is safe
 - **A parser refused a file:** the manifest records it as `failed` with the reason, and its partition fails by name. The layout changed, so it needs a new parser version, proven on every raw file
+- **`rows_as_loaded` failed:** a file's rows in ODS changed after their load, or were loaded twice. Find what wrote them in BigQuery's job history before rebuilding anything from them. BigQuery keeps seven days of a table's history to restore from, and the raw files can always be parsed again
 - **A check failed:** find why before rebuilding. Everything above ODS can be rebuilt, so the data is never lost, only wrong for a while. Record what happened and what fixed it in the [progress log](phase1/progress.md#log)
 
 ## Keeping this page

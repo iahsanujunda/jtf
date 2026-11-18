@@ -9,7 +9,14 @@ from jtf.ingest.sources import SOURCES
 from jtf.orchestration.dbt import DBT_PROJECT, REBUILD_ON_UPDATE, dbt_models
 from jtf.orchestration.definitions import defs
 from jtf.orchestration.ml import OUTCOMES, PREDICTIONS, solar_backtest_metrics, solar_predictions
-from jtf.orchestration.ods import FILE_CHECKS, MANIFEST_KEY, MANIFEST_SPEC, ODS_ASSETS, ods_key
+from jtf.orchestration.ods import (
+    FILE_CHECKS,
+    MANIFEST_KEY,
+    MANIFEST_SPEC,
+    ODS_ASSETS,
+    ROWS_AS_LOADED,
+    ods_key,
+)
 from jtf.orchestration.raw import RAW_ASSETS, raw_bucket_sensor, raw_key
 from jtf.orchestration.resources import BigQuery, RawBucket
 from jtf.parse import PARSERS
@@ -78,8 +85,8 @@ def test_the_ods_asset_loads_a_day_and_reports_its_checks_and_the_manifest(wareh
     reported = {m.asset_key: m for m in result.asset_materializations_for_node(node)}
     assert set(reported) == {ods_tepco_actuals.key, MANIFEST_KEY}
     assert reported[ods_tepco_actuals.key].metadata["rows"].value == 202
-    (check,) = result.get_asset_check_evaluations()
-    assert check.check_name == FILE_CHECKS and check.passed
+    checks = {c.check_name: c.passed for c in result.get_asset_check_evaluations()}
+    assert checks == {FILE_CHECKS: True, ROWS_AS_LOADED: True}
     assert len(warehouse.rows("tepco_actuals")) == 202
 
     again = dg.materialize(

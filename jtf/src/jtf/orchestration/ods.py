@@ -13,9 +13,12 @@ from jtf.orchestration.raw import EXTRACTION_DAYS, raw_key
 from jtf.orchestration.resources import BigQuery, RawBucket
 from jtf.parse import PARSERS
 from jtf.parse.base import Parser
+from jtf.parse.fingerprint import verify
 from jtf.parse.load import MANIFEST, parse_day
 
 FILE_CHECKS = "files_pass_checks"
+# Every file's rows still as loaded, by their fingerprints (jtf/src/jtf/parse/fingerprint.py)
+ROWS_AS_LOADED = "rows_as_loaded"
 
 # Every ODS asset writes the manifest, so no single asset owns it. Each parse that writes it reports
 # a materialization, so that models reading it (capture start, the decision-time spine) rebuild.
@@ -43,21 +46,32 @@ def ods_asset(parser: Parser) -> dg.AssetsDefinition:
                 FILE_CHECKS,
                 asset=key,
                 description="Every parsed file passes its per-file checks: slots, keys, ranges",
-            )
+            ),
+            dg.AssetCheckSpec(
+                ROWS_AS_LOADED,
+                asset=key,
+                description=(
+                    "Every file's rows in the table still match the fingerprint recorded at their "
+                    "load; only partitions whose row count or last change moved are read"
+                ),
+            ),
         ],
     )
     def _ods(
         context: dg.AssetExecutionContext, raw_bucket: RawBucket, bigquery: BigQuery
     ) -> dg.MaterializeResult:
+        warehouse = bigquery.warehouse()
         result = parse_day(
             parser,
             raw_bucket.store(),
-            bigquery.warehouse(),
+            warehouse,
             context.partition_key,
             batch_id=context.run.run_id,
             now=datetime.now(UTC),
         )
         context.log.info(result.summary())
+        verification = verify(warehouse, parser.table)
+        context.log.info(verification.summary())
         if result.recorded:
             context.log_event(
                 dg.AssetMaterialization(
@@ -84,7 +98,16 @@ def ods_asset(parser: Parser) -> dg.AssetsDefinition:
                     check_name=FILE_CHECKS,
                     passed=not result.flagged,
                     metadata={"flagged": dg.MetadataValue.json(result.flagged)},
-                )
+                ),
+                dg.AssetCheckResult(
+                    check_name=ROWS_AS_LOADED,
+                    passed=verification.ok,
+                    metadata={
+                        "partitions": verification.partitions,
+                        "reread": dg.MetadataValue.json([str(d) for d in verification.reread]),
+                        "problems": dg.MetadataValue.json(verification.problems),
+                    },
+                ),
             ],
         )
 
