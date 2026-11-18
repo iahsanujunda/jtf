@@ -21,7 +21,7 @@ The standard for everyone who changes this repository, people and agents alike: 
 
 1. One parser per file layout ([parse](../jtf/src/jtf/parse/README.md)): it changes the format, never the meaning. Offline tests on fixtures cut from real raw files
 2. **Prove it on every raw file** of its source with `jtf parse` into dev ODS, with Dagster stopped
-3. **Then orchestrate it** by listing its table in `ORCHESTRATED` ([ods.py](../jtf/src/jtf/orchestration/ods.py)). Changing what a parser writes bumps its `VERSION`: the new rows are appended under it, and ODS is never updated
+3. **Then orchestrate it** by listing its table in `ORCHESTRATED` ([ods.py](../jtf/src/jtf/orchestration/ods.py)). Changing what a parser writes bumps its `VERSION`: the new rows are appended under it, and ODS is never updated. Each load records its files' fingerprints, and the asset's `rows_as_loaded` check fails if a file's rows change afterwards
 
 ## A warehouse model (settled)
 
@@ -55,6 +55,7 @@ Labels and outcomes are dbt models and predictions are appended by `jtf.ml` unde
 
 - **A capture failed or is late:** its health check says so. Run the job again (`gcloud run jobs execute`); a capture seen again adds no version, so a rerun is safe
 - **A parser refused a file:** the manifest records it as `failed` with the reason, and its partition fails by name. The layout changed, so it needs a new parser version, proven on every raw file
+- **`rows_as_loaded` failed:** a file's rows in ODS changed after their load, or were loaded twice. Find what wrote them in BigQuery's job history before rebuilding anything from them. BigQuery keeps seven days of a table's history to restore from, and the raw files can always be parsed again
 - **A check failed:** find why before rebuilding. Everything above ODS can be rebuilt, so the data is never lost, only wrong for a while. Record what happened and what fixed it in the [progress log](phase1/progress.md#log)
 
 ## Keeping this page

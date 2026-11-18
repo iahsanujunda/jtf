@@ -21,9 +21,9 @@ The warehouse owns every test of its SQL:
 
 - **dbt data tests** on models (uniqueness, not-null, accepted ranges, 48 slots per day) and singular tests in [tests/](tests/)
 - **dbt unit tests** (YAML `unit_tests:`) for the logic that must never be wrong: the `as_of` macro, unit conversions, slot normalisation
-- **Rules** in [rules/](rules/): manifest and sqlglot checks over compiled SQL, and a fingerprint test that ODS rows never change
+- **Rules** in [rules/](rules/): manifest and sqlglot checks over compiled SQL. That ODS rows never change after their load is checked by the ODS assets, not here ([fingerprint.py](../../jtf/src/jtf/parse/fingerprint.py))
 
-In CI the unit tests, an empty build and the rules run in a throwaway PR dataset that reads no real data. The data tests run on real data after every build, as Dagster checks; the fingerprint after every load, once built (before step 6).
+In CI the unit tests, an empty build and the rules run in a throwaway PR dataset that reads no real data. The data tests run on real data after every build, as Dagster checks.
 
 CI's check, run by hand against the dev project (needs `bigquery.user` there):
 

@@ -204,3 +204,60 @@ def dagster_update(
     except RuntimeError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
+
+
+ods = typer.Typer(
+    help="ODS's fingerprints: each file's rows as they were loaded.", no_args_is_help=True
+)
+app.add_typer(ods, name="ods")
+Tables = Annotated[
+    list[str] | None,
+    typer.Option("--table", help="One ODS table (repeatable); every one if omitted."),
+]
+
+
+def _ods_tables(tables: list[str] | None) -> list[str]:
+    from jtf.parse import PARSERS
+
+    unknown = set(tables or []) - set(PARSERS)
+    if unknown:
+        raise typer.BadParameter(f"not an ODS table: {sorted(unknown)}", param_hint="--table")
+    return tables or list(PARSERS)
+
+
+@ods.command("backfill-fingerprints")
+def ods_backfill_fingerprints(project: Project, table: Tables = None) -> None:
+    """Fingerprint every file in ODS with no record yet, as `backfill`: guarded from now on, not
+    from its load. Reads each table whole; run it with Dagster quiet, as `jtf parse`."""
+    from uuid import uuid4
+
+    from jtf.parse.bigquery import BigQueryWarehouse
+    from jtf.parse.fingerprint import backfill
+
+    warehouse, batch = BigQueryWarehouse(project), f"backfill-{uuid4()}"
+    for name in _ods_tables(table):
+        typer.echo(f"{name}: {backfill(warehouse, name, batch_id=batch)} files fingerprinted")
+
+
+@ods.command("verify")
+def ods_verify(
+    project: Project,
+    table: Tables = None,
+    everything: Annotated[
+        bool, typer.Option("--all", help="Read every partition, not only those the screen flags.")
+    ] = False,
+) -> None:
+    """Check that every file's rows still match their recorded fingerprint, as the ODS assets do
+    after each load; with --all, every file is read again (all of ODS, about 4 GB)."""
+    from jtf.parse.bigquery import BigQueryWarehouse
+    from jtf.parse.fingerprint import verify
+
+    warehouse, ok = BigQueryWarehouse(project), True
+    for name in _ods_tables(table):
+        verification = verify(warehouse, name, everything=everything)
+        typer.echo(verification.summary())
+        for file, problem in verification.problems.items():
+            typer.echo(f"  {file}: {problem}")
+        ok = ok and verification.ok
+    if not ok:
+        raise typer.Exit(code=1)

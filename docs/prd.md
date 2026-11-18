@@ -249,8 +249,8 @@ jepx-tokyo-forecast/
 
 | Component | Owns | Its tests prove | Runs |
 | --- | --- | --- | --- |
-| `jtf/` | All logic outside SQL: fetch, parse, storage, ML, Dagster definitions, CLI | Parsers on real source files, create-only storage, deterministic model code, Dagster definitions load | Offline, no credentials |
-| `warehouse/dbt/` | All SQL: DWD, DWS, ADS, monitoring, the `as_of` macro | dbt data tests; dbt unit tests for `as_of`, unit conversions and slot labels; rules (no clock reads, inputs only through `as_of`, no DWS read of ODS); a fingerprint test that no ODS row was changed after its load | In CI, hermetic: unit tests, an empty build and the rules in a PR dataset that reads no real data. On real data: the data tests after every build, as pipeline checks, and the fingerprint after every load |
+| `jtf/` | All logic outside SQL: fetch, parse, storage, ML, Dagster definitions, CLI | Parsers on real source files, create-only storage, deterministic model code, Dagster definitions load, ODS fingerprints recorded at load and checked after it | Offline, no credentials |
+| `warehouse/dbt/` | All SQL: DWD, DWS, ADS, monitoring, the `as_of` macro | dbt data tests; dbt unit tests for `as_of`, unit conversions and slot labels; rules (no clock reads, inputs only through `as_of`, no DWS read of ODS) | In CI, hermetic: unit tests, an empty build and the rules in a PR dataset that reads no real data. On real data: the data tests after every build, as pipeline checks, and the fingerprint after every load |
 | `dashboard/` | The React app | Views render fixture snapshots correctly | Offline |
 | `deploy/` | Terraform and Dagster deployment config | `terraform validate` and `plan` per environment; compose config valid | Plan needs read access to GCP |
 | `e2e_tests/` | Nothing of its own | Determinism, future poison, reproduce, one day end to end | In a PR dataset, when `jtf/` or `warehouse/` changes |
@@ -407,7 +407,7 @@ One stack, with fault switches that are off in normal runs. Each scenario is a r
 | --- | --- | --- | --- | --- | --- |
 | F1 | Late weather forecast | Skip the latest weather run | Freshness check before the cutoff | Fall back to the previous run; flag degraded; widen ranges | Game day |
 | F2 | Lookahead leak | Feature uses actual weather (or `CURRENT_DATE`) instead of the forecast | sqlglot rule in CI; gap between leaky and as-of backtest | Block the merge; write up how much better the leak looked | CI + demo |
-| F3 | Overwritten history | `UPDATE` an ODS row in place | The per-file fingerprint test after every load; determinism and replay test | Re-parse from the raw files in Cloud Storage | CI |
+| F3 | Overwritten history | `UPDATE` an ODS row in place | The per-file fingerprint check after every load; determinism and replay test | Re-parse from the raw files in Cloud Storage | CI |
 | F4 | Timezone bug | Load UTC timestamps as JST | Sanity check: solar output > 0 at night | Block the run; alert | CI |
 | F5 | Unit change | Read kWh per slot, or 万kW, as MW | Range assertion against capacity: a ceiling, and a floor on the week's peak, since 万kW read as MW is ten times too small and passes a ceiling | Block the run; alert | CI |
 | F6 | Missing slots | Drop some 30-min actuals | Completeness check per day | Flag and impute; exclude from training labels | CI |
