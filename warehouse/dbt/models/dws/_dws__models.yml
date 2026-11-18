@@ -154,6 +154,42 @@ models:
           arguments:
             expression: (ghi_w_m2 is null) = (ghi_w_m2_model is null) and (temperature_c is null) = (temperature_c_model is null)
 
+  - name: dws_fidelity
+    description: >
+      How exact each decision time's inputs are: per decision time and input (actuals_d2, weather,
+      capacity), the versions T read and how many are approximate. Fidelity comes from what T read,
+      not from a date (notebooks/06_warehouse_against_sources.ipynb, section 3; PRD, Fidelity).
+    columns:
+      - name: decision_time
+        data_tests: [not_null]
+      - name: target_day
+        data_tests: [not_null]
+      - name: input
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [actuals_d2, weather, capacity]
+      - name: versions_read
+        description: The versions or values the input read at T.
+      - name: approximate_versions
+        description: >
+          Those dated by a rule in a way that may differ from what was known then: rule-dated
+          actuals, weather from the history sources, a rule-dated release whose files changed after
+          its known_at.
+      - name: fidelity
+        description: exact when no version read is approximate.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [exact, approximate]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [decision_time, input]
+      - expression_is_true:
+          arguments:
+            expression: versions_read > 0 and approximate_versions between 0 and versions_read
+
 unit_tests:
   # T is 09:00 JST on 2026-11-16 (00:00 UTC); its target day is 2026-11-17, D−2 is 2026-11-15.
   - name: as_of_sees_only_what_was_known_at_t
@@ -470,3 +506,46 @@ unit_tests:
             timestamp_add(timestamp '2026-11-17 15:00:00+00', interval 30 * (slot_code - 1) minute) as slot_start
         from unnest(generate_array(1, 48)) as slot_code
 
+  # dws_fidelity. T is 09:00 JST on D−1 (00:00 UTC). At T on the 16th every input is approximate,
+  # at T on the 17th every one is exact.
+  - name: fidelity_is_per_input_from_the_versions_read
+    description: >
+      At T on the 16th: D−2's slot 00:00 is rule-dated, so actuals_d2 is approximate; a version of
+      a D−2 slot known one minute after T and a wind value are not read. The weather comes from
+      Previous Runs. One of the two releases read has files changed after its known_at. At T on
+      the 17th: D−2's slots are captured, the weather is the live capture, and the rule-dated
+      release's files are unchanged since its known_at, so it counts as exact.
+    model: dws_fidelity
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:00:00+00"}
+          - {decision_time: "2026-11-17 00:00:00+00", target_day: "2026-11-18", slot_start: "2026-11-18 03:00:00+00"}
+      - input: ref('dwd_tepco_actuals')
+        rows:
+          - {slot_start: "2026-11-14 15:00:00+00", measure: solar, basis: rule, known_at: "2026-11-14 16:30:00+00", known_until: null}
+          - {slot_start: "2026-11-15 03:00:00+00", measure: solar, basis: captured, known_at: "2026-11-15 05:00:00+00", known_until: null}
+          - {slot_start: "2026-11-15 03:30:00+00", measure: solar, basis: captured, known_at: "2026-11-16 00:01:00+00", known_until: null}
+          - {slot_start: "2026-11-15 03:00:00+00", measure: wind, basis: rule, known_at: "2026-11-15 05:00:00+00", known_until: null}
+          - {slot_start: "2026-11-16 03:00:00+00", measure: solar, basis: captured, known_at: "2026-11-16 23:45:00+00", known_until: null}
+      - input: ref('dws_weather')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", source: previous_runs}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", source: previous_runs}
+          - {decision_time: "2026-11-17 00:00:00+00", target_day: "2026-11-18", source: live}
+      - input: ref('dws_capacity')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", oldest_ref_date: "2026-03-31", newest_ref_date: "2026-06-30"}
+          - {decision_time: "2026-11-17 00:00:00+00", target_day: "2026-11-18", oldest_ref_date: "2026-03-31", newest_ref_date: "2026-03-31"}
+      - input: ref('dwd_capacity_releases')
+        rows:
+          - {ref_date: "2026-03-31", basis: rule, known_at: "2026-08-18 15:00:00+00", known_until: null, a_last_modified: "2026-08-18 04:42:27+00", b_last_modified: "2026-08-18 04:42:52+00"}
+          - {ref_date: "2026-06-30", basis: rule, known_at: "2026-11-01 15:00:00+00", known_until: null, a_last_modified: "2026-11-10 00:00:00+00", b_last_modified: "2026-11-01 00:00:00+00"}
+    expect:
+      rows:
+        - {decision_time: "2026-11-16 00:00:00+00", input: actuals_d2, versions_read: 2, approximate_versions: 1, fidelity: approximate}
+        - {decision_time: "2026-11-16 00:00:00+00", input: weather, versions_read: 2, approximate_versions: 2, fidelity: approximate}
+        - {decision_time: "2026-11-16 00:00:00+00", input: capacity, versions_read: 2, approximate_versions: 1, fidelity: approximate}
+        - {decision_time: "2026-11-17 00:00:00+00", input: actuals_d2, versions_read: 1, approximate_versions: 0, fidelity: exact}
+        - {decision_time: "2026-11-17 00:00:00+00", input: weather, versions_read: 1, approximate_versions: 0, fidelity: exact}
+        - {decision_time: "2026-11-17 00:00:00+00", input: capacity, versions_read: 1, approximate_versions: 0, fidelity: exact}
