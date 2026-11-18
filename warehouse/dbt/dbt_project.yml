@@ -10,6 +10,12 @@ seed-paths: [seeds]
 target-path: target
 clean-targets: [target, dbt_packages]
 
+# Every parse reads the whole project, about a second more than a partial one. A partial parse
+# kept a renamed unit test under its old name too when a sources file changed in the same parse,
+# and the stale copy failed every build of its model (rules/test_parse.py).
+flags:
+  partial_parse: false
+
 vars:
   # Decision time T is 09:00 JST on D−1, one hour before JEPX's 10:00 gate closure.
   decision_hour_jst: 9

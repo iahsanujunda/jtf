@@ -1,5 +1,5 @@
 # Local shortcuts only. CI calls the same tools directly.
-.PHONY: setup lint fmt test image dagster dbt
+.PHONY: setup lint fmt test image dagster dagster-update dbt
 
 IMAGE ?= jtf:local
 
@@ -25,6 +25,10 @@ image:
 dagster:
 	mkdir -p .dagster
 	DAGSTER_HOME=$(CURDIR)/.dagster uv run --group ml dagster dev -m jtf.orchestration.definitions
+
+# Pull main into the checkout Dagster runs from, with no run in between (see AGENTS.md)
+dagster-update:
+	uv run jtf dagster update
 
 # dbt against dev BigQuery with the settings in .env, e.g. make dbt ARGS="build --select dwd"
 dbt:
