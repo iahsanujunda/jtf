@@ -40,10 +40,11 @@ Labels and outcomes are dbt models and predictions are appended by `jtf.ml` unde
 
 - **`make lint` and `make test`, whatever the change touches**, notebooks and docs included: CI runs only on the paths its filter lists. Add `make rules` when the warehouse changes
 - **A new test must be seen to fail:** remove the logic it guards, run it, watch it fail, then restore the logic. A test that can't fail proves nothing
+- **A test that something had no effect must also show it happened:** that the planted rows reached the table, that the late file was loaded. Otherwise a pass can mean the input never arrived
 
 ## Release (new)
 
-1. **A pull request:** `main` takes changes only through one. CI runs the `jtf` job (ruff, unit tests, Dagster's definitions) and, for the warehouse, the `warehouse` job (unit tests, an empty build and the rules, in datasets of its own that read no real data) ([workflows](../.github/workflows/README.md))
+1. **A pull request:** `main` takes changes only through one. CI runs the `jtf` job (ruff, unit tests, Dagster's definitions) and, for the warehouse, the `warehouse` job (unit tests, an empty build and the rules, in datasets of its own that read no real data), and the `e2e` job (the time machine's guarantees on a world of real raw files, [e2e_tests](../e2e_tests/README.md)) ([workflows](../.github/workflows/README.md))
 2. **After the merge, in the main checkout: `make dagster-update`.** It stops the sensors, waits for running runs, pulls, reloads the code location and starts the sensors again. If dependencies changed it refuses: stop `make dagster`, then `git pull`, `make setup` and `make dagster`
 3. **Check after, in the data:**
    - A changed model rebuilds only when one of its inputs updates, so materialize it and what reads it in the UI (not group `ml`), then look at its rows, not only its checks: a table that is consistently behind passes every check of it agreeing with itself

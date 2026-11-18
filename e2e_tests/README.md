@@ -6,7 +6,7 @@ Only the guarantees no single component can prove alone. Everything else is test
 | --- | --- | --- |
 | Determinism | Replaying the same `T` twice gives identical output | jtf + dbt |
 | Future poison | Rows with `known_at` after `T` and absurd values change nothing in a replay at `T`, so nothing bypasses `as_of` | jtf + dbt |
-| Backfill stability | A late history load, raw files for past periods fetched now, leaves every decision time's inputs as they were, except rule-dated rows before their source's capture start | jtf + dbt + the ODS fingerprint |
+| Backfill stability | A late history load, raw files for past periods fetched now, leaves what each decision time read from captures as it was; it may add only rule-dated history (for the actuals, before their capture start). Planted for the actuals; a late weather history load, which adds rule-dated versions wherever a decision time read history, is not tested yet | jtf + dbt + the ODS fingerprint |
 | Reproduce | A what-if run, then a reproduce of that run, match exactly | jtf + dbt + run records |
 | One day end to end | A small fixture world goes raw → ODS → DWD → DWS → forecast with the expected shape and checks | all of the pipeline |
 

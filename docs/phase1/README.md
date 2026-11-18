@@ -232,7 +232,7 @@ What it needs in phase 1: raw files never modified and an append-only ODS; every
 
 - Determinism: the same `T` twice gives identical output
 - Future poison: insert rows with `known_at` after `T` and absurd values; a replay at `T` must not change
-- Backfill stability: build features as of several past `T`, load a simulated backfill fetched now (raw files for past periods, as a late initial load would bring), and build them again. Every input captured before `T` must come out identical; new rows may appear only with `basis = rule`, and only for times before their source's capture start. A backfill must never change what a past forecast saw
+- Backfill stability: build features as of several past `T`, load a simulated backfill fetched now (raw files for past periods, as a late initial load would bring), and build them again. Everything `T` read from captures must come out identical. What `T` read from history may gain versions, only with `basis = rule`: for a source with a daily capture, only for times before its capture start; for the weather history, which has none, wherever `T` read it, and its fidelity already says `approximate`. A backfill must never change what a past forecast saw from captures
 - Reproduce: a what-if run, then a reproduce of that run, match exactly
 - One day end to end: a small world of real raw files goes from raw files to a forecast, with every check green
 
