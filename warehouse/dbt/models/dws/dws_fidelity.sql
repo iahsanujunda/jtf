@@ -12,7 +12,7 @@
     whose files are unchanged since its known_at is exact: its figures are the published ones and
     the rule never dates it early, so it is as precise as a capture
 
-  A run is exact at T only where every input its model reads is (ads_runs). The seven days of
+  A run is exact at T only where every input its model reads is (ads_ml_runs). The seven days of
   actuals the ratio baseline reads join with that feature, in step 7.
 #}
 

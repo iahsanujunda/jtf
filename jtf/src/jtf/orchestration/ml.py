@@ -1,10 +1,10 @@
 """A model's runs as assets, materialized by hand, since a run is deliberate (jtf.ml.replay):
 
-1. `ads/ads_prediction_solar`: one run's predictions, appended to ADS under its run ID, and its
-   record in `ads_runs`. Its config says which run: a backtest over test months, a what-if over
+1. `ads/ads_ml_prediction_solar`: one run's predictions, appended to ADS under its run ID, and its
+   record in `ads_ml_runs`. Its config says which run: a backtest over test months, a what-if over
    target days, or a reproduce of an earlier run. Keyed as dbt's source for the predictions, so
    it is one node in the lineage
-2. `ads/ads_outcome_solar`: a dbt model, each prediction met by its label
+2. `ads/ads_ml_outcome_solar`: a dbt model, each prediction met by its label
 3. `ml/solar_backtest_metrics`: a backtest's outcome aggregated per fold, logged to MLflow
 
 So the lineage runs from raw files through DWS to the metrics. Folds, the models, runs and the
@@ -28,8 +28,8 @@ from jtf.ml.replay import Mismatch, Refused, reproduce, run, target_day
 from jtf.ml.tracking import log_backtest, run_code
 from jtf.orchestration.resources import Datasets
 
-PREDICTIONS = dg.AssetKey(["ads", "ads_prediction_solar"])
-OUTCOMES = dg.AssetKey(["ads", "ads_outcome_solar"])
+PREDICTIONS = dg.AssetKey(["ads", "ads_ml_prediction_solar"])
+OUTCOMES = dg.AssetKey(["ads", "ads_ml_outcome_solar"])
 
 
 class RunConfig(dg.Config):
@@ -65,8 +65,8 @@ def _days(config: RunConfig, warehouse) -> tuple[date, date]:
 
 @dg.asset(
     key=PREDICTIONS,
-    deps=[dg.AssetKey(["dws", "dws_solar_features"]), dg.AssetKey(["ads", "ads_label_solar"])],
-    group_name="ml",
+    deps=[dg.AssetKey(["dws", "dws_solar_features"]), dg.AssetKey(["ads", "ads_ml_label_solar"])],
+    group_name="ads_ml",  # an ADS table: grouped by its application, as dbt's are (dbt.group_of)
     kinds={"python", "bigquery"},
     description="One run of a model: its predictions for every decision time asked, and its record",
 )
@@ -123,7 +123,7 @@ def solar_backtest_metrics(
 ) -> dg.MaterializeResult:
     event = context.instance.get_latest_materialization_event(PREDICTIONS)
     if event is None or event.asset_materialization is None:
-        raise dg.Failure("no predictions yet: materialize ads/ads_prediction_solar first")
+        raise dg.Failure("no predictions yet: materialize ads/ads_ml_prediction_solar first")
     run = {k: v.value for k, v in event.asset_materialization.metadata.items()}
     if run.get("mode") != "backtest":
         raise dg.Failure(f"the newest run is a {run.get('mode')}, not a backtest: nothing to score")

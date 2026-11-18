@@ -6,7 +6,7 @@ import dagster as dg
 from conftest import FIXTURES
 from jtf.ingest.landed import SIDECAR
 from jtf.ingest.sources import SOURCES
-from jtf.orchestration.dbt import DBT_PROJECT, REBUILD_ON_UPDATE, dbt_models
+from jtf.orchestration.dbt import DBT_PROJECT, REBUILD_ON_UPDATE, dbt_models, group_of
 from jtf.orchestration.definitions import defs
 from jtf.orchestration.ml import (
     BACKTEST,
@@ -168,9 +168,17 @@ def test_models_rebuild_on_their_own_and_seeds_only_by_hand():
     nodes = json.loads(DBT_PROJECT.manifest_path.read_text())["nodes"].values()
     seeds = {n["name"] for n in nodes if n["resource_type"] == "seed"}
     for spec in dbt_models.specs:
-        assert spec.key.path[0] == spec.group_name in {"dim", "dwd", "dws", "ads"}, spec.key
+        assert spec.key.path[0] in {"dim", "dwd", "dws", "ads"}, spec.key
         expected = None if spec.key.path[-1] in seeds else REBUILD_ON_UPDATE
         assert spec.automation_condition == expected, spec.key
+
+
+def test_assets_are_grouped_by_layer_and_in_ads_by_application():
+    graph = defs.resolve_asset_graph()
+    groups = {key: graph.get(key).group_name for key in graph.get_all_asset_keys()}
+    expected = {key: group_of(key.path[0], key.path[-1]) for key in groups}
+    assert groups == expected
+    assert {g for g in groups.values() if g.startswith("ads")} == {"ads_ml"}
 
 
 def test_the_manifest_is_downstream_of_every_ods_asset():

@@ -19,7 +19,7 @@ def test_the_last_fold_is_the_newest_month_with_every_day_labelled():
     assert last_complete_month(date(2026, 10, 31)) == date(2026, 10, 1)
     assert last_complete_month(date(2026, 10, 30)) == date(2026, 9, 1)
     assert last_complete_month(date(2024, 12, 31)) == date(2024, 12, 1)
-    with pytest.raises(ValueError, match="ads_label_solar"):
+    with pytest.raises(ValueError, match="ads_ml_label_solar"):
         last_complete_month(None)
 
 

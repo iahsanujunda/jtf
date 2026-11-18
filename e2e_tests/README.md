@@ -10,7 +10,7 @@ Only the guarantees no single component can prove alone. Everything else is test
 | Reproduce | A what-if run, then a reproduce of that run, match exactly | jtf + dbt + run records |
 | One day end to end | A small fixture world goes raw → ODS → DWD → DWS → forecast with the expected shape and checks | all of the pipeline |
 
-"Identical" is checked by fingerprint, the function the ODS check uses ([fingerprint.py](../jtf/src/jtf/parse/fingerprint.py)): each decision time's DWS rows, every table after a rebuild, and each run's inputs and outputs (`ads_runs`).
+"Identical" is checked by fingerprint, the function the ODS check uses ([fingerprint.py](../jtf/src/jtf/parse/fingerprint.py)): each decision time's DWS rows, every table after a rebuild, and each run's inputs and outputs (`ads_ml_runs`).
 
 ## Running them
 

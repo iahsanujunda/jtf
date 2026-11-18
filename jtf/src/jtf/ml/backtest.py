@@ -35,7 +35,7 @@ def last_complete_month(newest_complete_day: date | None) -> date:
     """The newest month with every day labelled, given the newest day with all 48 slots labelled.
     Labels run without gaps, so that is the month before the day after it."""
     if newest_complete_day is None:
-        raise ValueError("no day has all 48 slots labelled: build ads_label_solar first")
+        raise ValueError("no day has all 48 slots labelled: build ads_ml_label_solar first")
     following = newest_complete_day + timedelta(days=1)
     return (pd.Timestamp(following.year, following.month, 1) - pd.DateOffset(months=1)).date()
 
@@ -66,8 +66,9 @@ AGGREGATES = {
 
 def metrics(outcomes: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
     """Per fold and overall, over daylight slots with a label (plan, Metrics): MAE and bias as a
-    share of the capacity at each decision time (`error_share` from ads_outcome_solar), and MAE in
-    MW. `outcomes` must come sorted, so the means add the same floats in the same order every run.
+    share of the capacity at each decision time (`error_share` from ads_ml_outcome_solar), and
+    MAE in MW. `outcomes` must come sorted, so the means add the same floats in the same order
+    every run.
     """
     scored = outcomes[outcomes["is_daylight"].eq(True) & outcomes["error_mw"].notna()]
     scored = scored.assign(abs_share=scored["error_share"].abs(), abs_mw=scored["error_mw"].abs())

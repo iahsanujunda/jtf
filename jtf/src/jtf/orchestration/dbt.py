@@ -34,19 +34,25 @@ REBUILD_ON_UPDATE = (
 ).with_label("rebuild_on_update")
 
 
+def group_of(layer: str, name: str) -> str:
+    """An asset's group: its layer, and in ADS, which serves applications, the layer and its
+    application, the name's second word (`ads_ml_label_solar` is in `ads_ml`)."""
+    return f"{layer}_{name.split('_')[1]}" if layer == "ads" else layer
+
+
 class Translator(DagsterDbtTranslator):
-    """Groups by layer (`dim`, `dwd`, `dws`); models rebuild by themselves, seeds only by hand."""
+    """Groups by layer, ADS by application (`group_of`); models rebuild by themselves, seeds only
+    by hand."""
 
     def get_asset_spec(self, manifest, unique_id, project):
         spec = super().get_asset_spec(manifest, unique_id, project)
         props = self.get_resource_props(manifest, unique_id)
-        if props["resource_type"] == "model":
-            return spec.replace_attributes(
-                group_name=props["config"]["schema"], automation_condition=REBUILD_ON_UPDATE
-            )
+        if props["resource_type"] not in ("model", "seed"):
+            return spec
+        group = group_of(props["config"]["schema"], props["name"])
         if props["resource_type"] == "seed":
-            return spec.replace_attributes(group_name=props["config"]["schema"])
-        return spec
+            return spec.replace_attributes(group_name=group)
+        return spec.replace_attributes(group_name=group, automation_condition=REBUILD_ON_UPDATE)
 
 
 @dbt_assets(

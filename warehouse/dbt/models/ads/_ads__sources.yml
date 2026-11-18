@@ -7,7 +7,7 @@ sources:
   - name: ads
     schema: "{{ target.schema }}_ads"
     tables:
-      - name: ads_prediction_solar
+      - name: ads_ml_prediction_solar
         description: >
           What a model said: one row per run, model, decision time and slot. Backtests write
           mode `backtest`, every row tagged with its run, so runs never overwrite each other.

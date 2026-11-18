@@ -1,16 +1,16 @@
 -- Every prediction has exactly one outcome: the joins only add columns, so a run that lost or
 -- doubled rows on the way would be scored on the wrong slots.
-{{ config(meta={'dagster': {'ref': {'name': 'ads_outcome_solar'}}}) }}
+{{ config(meta={'dagster': {'ref': {'name': 'ads_ml_outcome_solar'}}}) }}
 
 with predictions as (
     select run_id, model, count(*) as predicted
-    from {{ source('ads', 'ads_prediction_solar') }}
+    from {{ source('ads', 'ads_ml_prediction_solar') }}
     group by run_id, model
 ),
 
 outcomes as (
     select run_id, model, count(*) as scored
-    from {{ ref('ads_outcome_solar') }}
+    from {{ ref('ads_ml_outcome_solar') }}
     group by run_id, model
 )
 

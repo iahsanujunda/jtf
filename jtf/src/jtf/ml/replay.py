@@ -1,4 +1,4 @@
-"""Runs of a model over decision times, each recorded in `ads_runs`: the time machine's mechanism
+"""Runs of a model over decision times, each recorded in `ads_ml_runs`: the time machine's mechanism
 (plan, Time machine). One mechanism for every mode:
 
 - `backtest`: the folds of a rolling backtest, scored afterwards by `ml/solar_backtest_metrics`
@@ -155,7 +155,7 @@ def reproduce(
     """Run `original` again with the same code, and fail unless its inputs and outputs match."""
     found = warehouse.run(original)
     if found.empty:
-        raise Refused(f"no run {original!r} in ads_runs")
+        raise Refused(f"no run {original!r} in ads_ml_runs")
     then = found.iloc[0]
     if then["tree_dirty"]:
         raise Refused(f"run {original} came from uncommitted code: there is nothing to reproduce")
