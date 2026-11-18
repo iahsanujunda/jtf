@@ -13,6 +13,10 @@ Day-ahead forecasts of Tokyo-area solar output and JEPX Tokyo-area prices, for t
 | [deploy/](deploy/) | Everything GCP-specific: settings contract, Terraform, Dagster deployment, scripts |
 | [.github/workflows/](.github/workflows/) | CI, release and model release |
 | [dashboard/](dashboard/) | React dashboard reading daily JSON snapshots, with its Vitest tests |
-| [docs/](docs/) | PRD, phase plans, scenario write-ups, diagrams |
+| [docs/](docs/) | PRD, phase plans, how a change travels, scenario write-ups, diagrams |
 
 Each component owns its code and its tests: `jtf/tests` for Python, dbt tests and SQL rules in `warehouse/dbt`, Vitest in `dashboard`, `terraform validate` and `plan` in `deploy`. `e2e_tests` covers only the guarantees that need several components together. The root `pyproject.toml` is a uv workspace with `jtf` as its member.
+
+## Working on it
+
+[docs/workflow.md](docs/workflow.md) is how a change travels, from a notebook to the running pipeline: where to work, how a change is proven, how it is released and what to check after. It is the standard for everyone, people and agents alike.
