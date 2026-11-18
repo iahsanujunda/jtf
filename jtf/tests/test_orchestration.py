@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 
 import dagster as dg
 
@@ -128,6 +129,25 @@ def test_the_backtest_runs_from_the_features_through_dbt_to_its_metrics_by_hand(
     # A backtest is a deliberate run: neither Python asset starts by itself.
     assert predictions.automation_condition is None
     assert metrics.automation_condition is None
+
+
+def test_every_dbt_test_is_a_check_of_its_own():
+    """Dagster keys a check by its asset and the test's name, and keeps one per key. dbt names a
+    generic test from its arguments with the operators dropped, so `a = b` and `a <= b` on one model
+    would share a check and one result would hide the other: such a test is named in its YAML."""
+    manifest = json.loads(DBT_PROJECT.manifest_path.read_text())
+    checked = Counter()
+    for node in manifest["nodes"].values():
+        if node["resource_type"] != "test":
+            continue
+        ref = (node["config"].get("meta") or {}).get("dagster", {}).get("ref", {}).get("name")
+        reads = [uid for uid in node["depends_on"]["nodes"] if uid.startswith(("model.", "seed."))]
+        attached = node.get("attached_node") or (reads[0] if len(reads) == 1 else None)
+        model = ref or (attached.split(".")[-1] if attached else None)
+        if model:
+            checked[(model, node["name"])] += 1
+    assert [key for key, count in checked.items() if count > 1] == []
+    assert len(dbt_models.check_keys) == checked.total()
 
 
 def test_models_rebuild_on_their_own_and_seeds_only_by_hand():
