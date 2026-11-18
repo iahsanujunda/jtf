@@ -119,6 +119,8 @@ Each is recorded where it applies; the list says where.
 | BigQuery | `ROWS` is a reserved word | The manifest column is `row_count` |
 | BigQuery | A table exists only after its first rows are loaded | Expected: the next-day tables appeared with tonight's first filled files |
 | BigQuery client | `load_table_from_dataframe` will need `pandas-gbq` | Added |
+| Typer in GitHub Actions | It forces Rich's terminal output there (`GITHUB_ACTIONS`), so a CLI error arrives in colour codes and a box, its line broken: a test passing locally failed in CI | CLI tests compare what a reader sees (`said` in `test_cli.py`); run `GITHUB_ACTIONS=true` to see CI's output |
+| pytest monkeypatch | A function patched in for `bigquery.Client` breaks any module imported after it that evaluates `bigquery.Client \| None`; the full suite hid it by importing those modules first | Patch in a class (`NoClient`) |
 | TEPCO | Pages answer 403 to the WebFetch tool | Fetch with `curl` and a user agent |
 | TEPCO | This month's archive zip doesn't exist on the 1st (404) | The daily capture takes yesterday's month and the one before |
 | TEPCO | Files are UTF-8 or CP932, varying from file to file; archive zips are rewritten for months | Decode by trying UTF-8 first; monthly re-captures |
