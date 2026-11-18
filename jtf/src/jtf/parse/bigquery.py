@@ -12,6 +12,14 @@ from jtf.parse.base import Column
 from jtf.parse.load import MANIFEST
 
 
+def schema_fields(columns: tuple[Column, ...]) -> list[bigquery.SchemaField]:
+    """A table's columns as BigQuery takes them: the loader's and CI's empty tables use the same."""
+    return [
+        bigquery.SchemaField(c.name, c.type, mode="REQUIRED" if c.required else "NULLABLE")
+        for c in columns
+    ]
+
+
 class BigQueryWarehouse:
     def __init__(self, project: str, dataset: str = "ods", client: bigquery.Client | None = None):
         self.client = client or bigquery.Client(project=project)
@@ -39,10 +47,7 @@ class BigQueryWarehouse:
         self, table: str, schema: tuple[Column, ...], cluster_by: str, rows: pd.DataFrame
     ) -> None:
         config = bigquery.LoadJobConfig(
-            schema=[
-                bigquery.SchemaField(c.name, c.type, mode="REQUIRED" if c.required else "NULLABLE")
-                for c in schema
-            ],
+            schema=schema_fields(schema),
             write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
             time_partitioning=bigquery.TimePartitioning(field="extraction_date"),
             clustering_fields=[cluster_by],

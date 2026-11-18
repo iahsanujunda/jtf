@@ -1,5 +1,5 @@
 # Values come from the environment (names in deploy/contract/settings.example.env), never git.
-# Each layer is its own dataset, named <prefix>_<layer>: dev_dim, dev_dwd, pr_123_dws and so on.
+# Each layer is its own dataset, named <prefix>_<layer>: dev_dim, dev_dwd, ci_123_dws and so on.
 jtf:
   target: dev
   outputs:
@@ -15,3 +15,16 @@ jtf:
       job_retries: 1
       # A guard, not a budget: no single query may scan more than 20 GB.
       maximum_bytes_billed: 20000000000
+    # CI's hermetic check (`dbt build --empty` on its own empty ODS): it should read nothing, so a
+    # query that reads more than 100 MB means something reached real data, and fails.
+    ci:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('JTF_BIGQUERY_PROJECT') }}"
+      dataset: "{{ env_var('JTF_DBT_DATASET_PREFIX') }}"
+      location: "{{ env_var('JTF_BIGQUERY_LOCATION') }}"
+      threads: 8
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1
+      maximum_bytes_billed: 100000000

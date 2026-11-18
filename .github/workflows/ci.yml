@@ -13,13 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       jtf: ${{ steps.filter.outputs.jtf }}
+      warehouse: ${{ steps.filter.outputs.warehouse }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           # The jtf job lints every notebook, and its tests load the dbt project into Dagster,
-          # so a change to either runs it too.
+          # so a change to either runs it too. The warehouse job also runs when the ODS schemas
+          # or the predictions table change, since CI makes its empty tables from them.
           filters: |
             jtf:
               - 'jtf/**'
@@ -28,6 +30,15 @@ jobs:
               - 'pyproject.toml'
               - 'uv.lock'
               - 'Dockerfile'
+              - '.github/workflows/ci.yml'
+            warehouse:
+              - 'warehouse/dbt/**'
+              - 'jtf/src/jtf/parse/**'
+              - 'jtf/src/jtf/ml/warehouse.py'
+              - 'jtf/src/jtf/ci.py'
+              - 'jtf/src/jtf/cli/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
               - '.github/workflows/ci.yml'
 
   jtf:
@@ -45,3 +56,56 @@ jobs:
       - run: uv run pytest
       - run: docker build -t jtf:ci .
       - run: docker run --rm jtf:ci version
+
+  # The warehouse's hermetic check (phase-1 plan, Decisions, "Warehouse CI"): every model's SQL
+  # on BigQuery against an empty ODS made from the parsers' own schemas, with the unit tests. It
+  # reads no real data; the data tests check real data in the pipeline instead.
+  warehouse:
+    needs: changes
+    # A pull request from a fork gets no identity token, so it can't reach GCP: skip, don't fail.
+    if: >-
+      needs.changes.outputs.warehouse == 'true' && (github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: warehouse-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      JTF_BIGQUERY_PROJECT: ${{ vars.GCP_DEV_PROJECT }}
+      JTF_BIGQUERY_LOCATION: ${{ vars.GCP_REGION }}
+      # One prefix per run, so a cancelled run's cleanup never drops a newer run's datasets.
+      JTF_DBT_DATASET_PREFIX: ci_${{ github.run_id }}_${{ github.run_attempt }}
+    steps:
+      - name: Check the repository variables are set
+        run: |
+          for name in GCP_DEV_PROJECT GCP_REGION GCP_WORKLOAD_IDENTITY_PROVIDER GCP_CI_DEV_SERVICE_ACCOUNT; do
+            if [ -z "${!name}" ]; then echo "::error::Repository variable $name is not set"; exit 1; fi
+          done
+        env:
+          GCP_DEV_PROJECT: ${{ vars.GCP_DEV_PROJECT }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_CI_DEV_SERVICE_ACCOUNT: ${{ vars.GCP_CI_DEV_SERVICE_ACCOUNT }}
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.13.7"
+      - run: uv sync --frozen
+      # Workload identity federation: no key is stored; GitHub's short-lived token is exchanged.
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_DEV_SERVICE_ACCOUNT }}
+      - name: Make the run's datasets and empty ODS
+        run: uv run jtf ci create
+      - name: Build every model on empty inputs, with the unit tests
+        working-directory: warehouse/dbt
+        run: >-
+          uv run dbt build --empty --exclude "test_type:data" --target ci --profiles-dir .
+          --vars "{ods_dataset: ${JTF_DBT_DATASET_PREFIX}_ods}"
+      - name: Drop the run's datasets
+        if: always()
+        run: uv run jtf ci drop

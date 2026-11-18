@@ -103,6 +103,9 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "google.subject"        = "assertion.sub"
     "attribute.repository"  = "assertion.repository"
     "attribute.environment" = "assertion.environment"
+    # The workflow file that is running, without the branch or pull request it runs for:
+    # owner/name/.github/workflows/ci.yml@refs/pull/16/merge becomes owner/name/.github/workflows/ci.yml
+    "attribute.workflow" = "assertion.job_workflow_ref.extract('{workflow}@')"
   }
   # Only this repository can use the pool at all.
   attribute_condition = "assertion.repository == '${var.github_repository}'"
@@ -128,11 +131,13 @@ resource "google_service_account" "ci_release" {
   depends_on = [google_project_service.apis]
 }
 
-# Any workflow run from the repository may act as the dev CI account.
+# Only the repository's CI workflow may act as the dev CI account, not any other workflow file. On a
+# pull request GitHub runs the PR's own copy of ci.yml, so this pins the file, not its contents;
+# pull requests from forks get no identity token at all.
 resource "google_service_account_iam_member" "ci_dev_from_github" {
   service_account_id = google_service_account.ci_dev.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repository}"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.workflow/${var.github_repository}/.github/workflows/ci.yml"
 }
 
 # Only jobs in the repository's "prod" GitHub environment, which requires approval, may act as the release account.
