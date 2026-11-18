@@ -1,0 +1,29 @@
+{
+ "source": "tepco_actuals",
+ "filename": "eria_jukyu_202611_03.csv",
+ "capture_group": "morning",
+ "load_type": "daily",
+ "url": "https://www.tepco.co.jp/forecast/html/images/eria_jukyu_202611_03.csv",
+ "method": "GET",
+ "params": {},
+ "form": {},
+ "fetched_at": "2026-11-15T02:13:43.543729+00:00",
+ "fetched_at_jst": "2026-11-15T11:13:43.543729+09:00",
+ "extraction_date": "2026-11-15",
+ "http_status": 200,
+ "response_headers": {
+  "server": "Apache",
+  "last-modified": "Sun, 15 Nov 2026 02:10:03 GMT",
+  "etag": "\"f642-6604728d0ced4\"",
+  "accept-ranges": "bytes",
+  "content-length": "63042",
+  "content-type": "text/csv",
+  "date": "Sun, 15 Nov 2026 02:13:43 GMT",
+  "connection": "keep-alive",
+  "strict-transport-security": "max-age=15768000 ; preload"
+ },
+ "size_bytes": 63042,
+ "sha256": "b254ee8e13ebbb62106fdc9c1800c8a14779d1bc0dc548607af3651949229417",
+ "jtf_version": "0.1.0",
+ "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:7d6f579ff1ad4eb4b1246b6a0671d72b5a242da116ddd9c194924506ed810e9b"
+}

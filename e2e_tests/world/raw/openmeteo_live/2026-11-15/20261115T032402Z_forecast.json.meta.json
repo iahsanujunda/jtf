@@ -1,0 +1,35 @@
+{
+ "source": "openmeteo_live",
+ "filename": "forecast.json",
+ "load_type": "daily",
+ "url": "https://api.open-meteo.com/v1/forecast",
+ "method": "GET",
+ "params": {
+  "latitude": "35.69,35.44,35.86,35.61,36.37,36.56,36.39,35.66,35.1",
+  "longitude": "139.69,139.64,139.65,140.12,140.47,139.88,139.06,138.57,138.86",
+  "hourly": "shortwave_radiation,direct_radiation,diffuse_radiation,cloud_cover,temperature_2m,wind_speed_10m",
+  "models": "jma_msm,jma_gsm,ecmwf_ifs025",
+  "forecast_days": "3"
+ },
+ "form": {},
+ "fetched_at": "2026-11-15T03:24:02.048853+00:00",
+ "fetched_at_jst": "2026-11-15T12:24:02.048853+09:00",
+ "extraction_date": "2026-11-15",
+ "http_status": 200,
+ "response_headers": {
+  "date": "Sun, 15 Nov 2026 03:24:01 GMT",
+  "content-type": "application/json; charset=utf-8",
+  "transfer-encoding": "chunked",
+  "connection": "keep-alive",
+  "x-ratelimit-cost": "16.2",
+  "x-ratelimit-limit": "600.0",
+  "x-ratelimit-remaining": "583.8",
+  "x-ratelimit-reset": "1794713048",
+  "x-ratelimit-window": "60",
+  "content-encoding": "deflate"
+ },
+ "size_bytes": 76504,
+ "sha256": "5dec1e933b5f02651527e302eae9ce8e0a60498ce1ec2479ad6c21720713e98e",
+ "jtf_version": "0.1.0",
+ "image_digest": "asia-northeast1-docker.pkg.dev/jepx-tokyo-forecast-prod/jtf/jtf@sha256:00c7f5e404da1ee091da849846ff558eaee891167a8c4ef3e9a8167ee8d2eb7c"
+}

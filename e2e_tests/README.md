@@ -16,7 +16,7 @@ Run against a throwaway PR dataset in the dev project, through Workload Identity
 
 ## The test world
 
-A window of real raw files, cut from the raw bucket by a script and loaded through the parsers into a CI prefix, then built by dbt with the window's variables (`first_target_day`, `sun_first_day`, `sun_last_day`). It is target days 15 to 19 November 2026, decided at 09:00 JST on the 14th to the 18th: the real seam at capture start.
+A window of real raw files in [world/raw](world/raw), made from the raw bucket by [world/make_world.py](world/make_world.py) and loaded through the parsers into a CI prefix, then built by dbt with the window's variables (`first_target_day`, `sun_first_day`, `sun_last_day`). It is target days 15 to 19 November 2026, decided at 09:00 JST on the 14th to the 18th: the real seam at capture start.
 
 **What the spike found** (2026-11-18, the files uncut, in a scratch prefix):
 
@@ -24,11 +24,13 @@ A window of real raw files, cut from the raw bucket by a script and loaded throu
 | --- | --- |
 | Which files | 42 raw files and their sidecars, 11.4 MB: the November month file of TEPCO's actuals as captured each day and re-captured (10), Previous Runs' two November files, 12 Single Runs, the 5 live captures, and for capacity the four releases a decision time in the window reads (8 spreadsheets), one archived copy of the page and the page's own fetches |
 | Capacity's dates | The four releases get the same `known_at` as in dev from one archived copy of the page (27 October 2026), which shows the latest announcement of all four |
-| Cutting | The city spreadsheets are 7 MB of the 11.4 and give 1.32 M of the 1.44 M rows, but the warehouse uses 20 Shizuoka cities of them, and their parser checks only for the national total. Cut to each sheet's header rows, the national total and Shizuoka, the world should be about 4.5 MB |
-| Time | Parsing 172 s, almost all of it the uncut city spreadsheets; a full `dbt build` 78 s; rebuilding the models 16 s |
+| Cutting | The city spreadsheets are 7 MB of the 11.4 and give 1.32 M of the 1.44 M rows, but the warehouse uses 20 Shizuoka cities of them, and their parser checks only for the national total. Cut to each sheet's header rows, the national total and Shizuoka, each is 38 kB instead of 1.78 MB, and the world is 4.5 MB. Its sidecars give the cut file's size and hash, and name the original's |
+| The cut world | Byte for byte the same on a second run of the script (the spreadsheets' save times are fixed). Built, it gives the uncut world's tables, 20 of 21 by fingerprint; the 21st, capacity's figures per file, carries the time of the parse, and equals dev's on every other column |
+| Time | Parsing 135 s, cut or uncut: BigQuery's round trips, a few per file, not the spreadsheets, so the harness parses sources side by side; a full `dbt build` 78 to 80 s; rebuilding the models 16 s |
 | What fails on five days | 242 of 248 green. `dim_sun_slots__matches_spa` fails with the sun limited to November (its reference has days all year): the e2e build skips that test or keeps the sun's full range. The outcome model needs the predictions table, which Python writes: the e2e setup makes it empty first, as `jtf ci create` does |
 | Complete | Every decision time has its 48 slots, D−2 in all of them, capacity, clear sky and weather |
 | Covered | The seam as in dev, to the version: 423 captured and 2,076 rule-dated versions of the actuals, Previous Runs' 104 corrections, the weather served from Previous Runs, then a Single Run, then live. Not covered: a late history load after capture start (the backfill test plants one) and a captured capacity release (none exists yet) |
 | Determinism | A rebuild gave identical fingerprints for all 21 tables |
 | Cost | About 4 GB billed for parsing, two builds, every test and the fingerprints, most of it BigQuery's 10 MB minimum on each of some 300 small queries; a CI run is a parse and a build |
 
+Two parses of the same world differ in one column, the parse time `dwd_capacity_area_files` keeps; two builds of one parse are identical. So the tests compare builds, never parses.
