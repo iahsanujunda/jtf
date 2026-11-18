@@ -106,6 +106,18 @@ jobs:
         run: >-
           uv run dbt build --empty --exclude "test_type:data" --target ci --profiles-dir .
           --vars "{ods_dataset: ${JTF_DBT_DATASET_PREFIX}_ods}"
+      # The SQL rules read every model as compiled, but not from the build above: --empty wraps
+      # each ref() in a subquery, which puts every table behind a wrapper of its own. The same vars,
+      # so the one lookup a compile makes (the incremental model's files) reads this run's empty ODS.
+      - name: Compile every model for the SQL rules
+        working-directory: warehouse/dbt
+        run: >-
+          uv run dbt compile --target ci --profiles-dir . --target-path target/rules
+          --vars "{ods_dataset: ${JTF_DBT_DATASET_PREFIX}_ods}"
+      - name: The SQL rules, over the compiled models
+        run: uv run pytest warehouse/dbt/rules
+        env:
+          JTF_DBT_COMPILED: warehouse/dbt/target/rules
       - name: Drop the run's datasets
         if: always()
         run: uv run jtf ci drop

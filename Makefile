@@ -1,7 +1,9 @@
 # Local shortcuts only. CI calls the same tools directly.
-.PHONY: setup lint fmt test image dagster dagster-update dbt
+.PHONY: setup lint fmt test rules image dagster dagster-update dbt
 
 IMAGE ?= jtf:local
+# Settings live in the main checkout's .env, gitignored, so worktrees read that one
+ENV_FILE := $(abspath $(shell git rev-parse --path-format=absolute --git-common-dir)/../.env)
 
 setup:
 	uv sync
@@ -16,6 +18,11 @@ fmt:
 
 test:
 	uv run pytest
+
+# The warehouse rules with the settings in .env, those over compiled SQL included: compiling reads
+# no data but needs BigQuery, so `make test` skips them
+rules:
+	set -a; . $(ENV_FILE); set +a; JTF_RULES_COMPILE=1 uv run pytest warehouse/dbt/rules
 
 image:
 	docker build -t $(IMAGE) .
@@ -32,4 +39,4 @@ dagster-update:
 
 # dbt against dev BigQuery with the settings in .env, e.g. make dbt ARGS="build --select dwd"
 dbt:
-	cd warehouse/dbt && uv run --env-file ../../.env dbt $(or $(ARGS),build) --profiles-dir .
+	cd warehouse/dbt && uv run --env-file $(ENV_FILE) dbt $(or $(ARGS),build) --profiles-dir .

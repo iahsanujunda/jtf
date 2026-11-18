@@ -6,15 +6,6 @@ over time (the sun, the weather points, the parts of the area) and reads only it
 layer can read it. Data tests read any layer: they check, they are not read.
 """
 
-import json
-import os
-from pathlib import Path
-
-import pytest
-from dbt.cli.main import dbtRunner
-
-DBT_DIR = Path(__file__).resolve().parents[1]
-
 READS = {
     "dim": {"dim"},
     "dwd": {"ods", "dim", "dwd"},
@@ -25,24 +16,6 @@ READS = {
 # Reads that break the rule, each to go when it is fixed (the last test fails once one is no longer
 # there). None since 2026-11-18: the decision-time spine reads dwd_source_captures, not ODS.
 KNOWN: set[tuple[str, str]] = set()
-
-
-@pytest.fixture(scope="module")
-def manifest(tmp_path_factory) -> dict:
-    """dbt's manifest of the project as it is on disk, parsed afresh into a temporary directory:
-    a rule checked against a stale manifest could pass on SQL that no longer exists. Parsing reads
-    no data, but the profile names these settings, so they need some value."""
-    for name, value in {
-        "JTF_BIGQUERY_PROJECT": "test-project",
-        "JTF_BIGQUERY_LOCATION": "asia-northeast1",
-        "JTF_DBT_DATASET_PREFIX": "test",
-    }.items():
-        os.environ.setdefault(name, value)
-    target = tmp_path_factory.mktemp("dbt_target")
-    args = ["parse", "--quiet", "--project-dir", str(DBT_DIR), "--profiles-dir", str(DBT_DIR)]
-    result = dbtRunner().invoke([*args, "--target-path", str(target)])
-    assert result.success, result.exception
-    return json.loads((target / "manifest.json").read_text())
 
 
 def layer(manifest: dict, unique_id: str) -> str:
