@@ -21,15 +21,30 @@ if not DBT_PROJECT.manifest_path.exists():
 
 AC = dg.AutomationCondition
 
+# How far upstream a model looks for something being built, in steps along the asset graph. It
+# must reach from every model back to the ODS assets; a test fails when the graph outgrows it.
+LEVELS = 12
+
+
+def anything_upstream_in_progress(levels: int) -> dg.AutomationCondition:
+    """True while an input is being built, or an input of an input, and so on for `levels`
+    steps. Dagster has no condition for "any ancestor", so it is nested this many times."""
+    busy = AC.any_deps_in_progress()
+    for _ in range(levels - 1):
+        busy = AC.any_deps_in_progress() | AC.any_deps_match(busy)
+    return busy
+
+
 # A model rebuilds when any of its inputs updates. Not `eager()`: an unpartitioned model under the
 # day-partitioned ODS assets would wait until every day had been parsed, so a single failed
-# capture would stop it for good. Nor while an input's own inputs are being built: a parse reports
-# the manifest from its first step, and on 2026-11-17 the decision-time spine rebuilt then, ahead
-# of the DWD it is joined with, so D−2 was incomplete for a minute.
+# capture would stop it for good. And never while anything upstream of it is being built, however
+# far: a parse reports the manifest from its first step, and a model that goes ahead of the parse
+# is built on inputs the same parse is about to change. Two levels of this were not enough: on
+# 2026-11-19 a tick fell inside a parse run, and three readers of the decision-time spine were
+# built before the spine, which was one step further from the parse than the guard looked.
 REBUILD_ON_UPDATE = (
     AC.any_deps_updated().since_last_handled()
-    & ~AC.any_deps_in_progress()
-    & ~AC.any_deps_match(AC.any_deps_in_progress())
+    & ~anything_upstream_in_progress(LEVELS)
     & ~AC.in_progress()
 ).with_label("rebuild_on_update")
 

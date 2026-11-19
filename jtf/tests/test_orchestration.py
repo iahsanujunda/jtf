@@ -6,7 +6,7 @@ import dagster as dg
 from conftest import FIXTURES
 from jtf.ingest.landed import SIDECAR
 from jtf.ingest.sources import SOURCES
-from jtf.orchestration.dbt import DBT_PROJECT, REBUILD_ON_UPDATE, dbt_models, group_of
+from jtf.orchestration.dbt import DBT_PROJECT, LEVELS, REBUILD_ON_UPDATE, dbt_models, group_of
 from jtf.orchestration.definitions import defs
 from jtf.orchestration.ml import (
     BACKTEST,
@@ -186,19 +186,26 @@ def test_the_manifest_is_downstream_of_every_ods_asset():
 
 
 class StandIns:
-    """Two ODS assets, the manifest, a DWD model and the spine, with the real automation condition.
+    """Three ODS assets, the manifest and four models shaped like the real ones, with the real
+    automation condition: `captures` reads the manifest (dwd_source_captures), `model` an ODS
+    table and the captures (dwd_tepco_actuals), `spine` the captures (dws_decision_slots), and
+    `reader` the spine and the model (dws_solar_features).
 
     Like the real ones, the ODS stand-ins report the manifest from their own step, and one run
-    parses both: `other` first, then `actuals`, which the model reads. `during_actuals` runs
-    inside the `actuals` step, while the run is still going.
+    parses all three, in order: `other`, `actuals` (which the model reads), `late`.
+    `during_actuals` and `during_late` run inside those steps, while the run is still going.
     """
 
     def __init__(self):
         days = dg.DailyPartitionsDefinition(start_date="2026-01-01", timezone="Asia/Tokyo")
         other_key, actuals_key = dg.AssetKey(["ods", "other"]), dg.AssetKey(["ods", "actuals"])
+        late_key = dg.AssetKey(["ods", "late"])
+        self.captures_key = dg.AssetKey(["dwd", "captures"])
         self.model_key = dg.AssetKey(["dwd", "model"])
         self.spine_key = dg.AssetKey(["dws", "spine"])
-        self.during_actuals = lambda: None
+        self.reader_key = dg.AssetKey(["dws", "reader"])
+        self.all = {self.captures_key, self.model_key, self.spine_key, self.reader_key}
+        self.during_actuals = self.during_late = lambda: None
 
         @dg.asset(key=other_key, partitions_def=days)
         def other(context: dg.AssetExecutionContext):
@@ -209,27 +216,39 @@ class StandIns:
             self.during_actuals()
             context.log_event(dg.AssetMaterialization(asset_key=MANIFEST_KEY))
 
-        manifest = dg.AssetSpec(MANIFEST_KEY, deps=[other_key, actuals_key])
+        @dg.asset(key=late_key, deps=[actuals_key], partitions_def=days)
+        def late(context: dg.AssetExecutionContext):
+            self.during_late()
+            context.log_event(dg.AssetMaterialization(asset_key=MANIFEST_KEY))
+
+        manifest = dg.AssetSpec(MANIFEST_KEY, deps=[other_key, actuals_key, late_key])
         rebuild = REBUILD_ON_UPDATE
 
+        @dg.asset(key=self.captures_key, deps=[MANIFEST_KEY], automation_condition=rebuild)
+        def captures(): ...
+
         @dg.asset(
-            key=self.model_key, deps=[actuals_key, MANIFEST_KEY], automation_condition=rebuild
+            key=self.model_key, deps=[actuals_key, self.captures_key], automation_condition=rebuild
         )
         def model(): ...
 
-        @dg.asset(key=self.spine_key, deps=[MANIFEST_KEY], automation_condition=rebuild)
+        @dg.asset(key=self.spine_key, deps=[self.captures_key], automation_condition=rebuild)
         def spine(): ...
 
-        self.ods, self.models = [other, actuals], [model, spine]
-        self.defs = dg.Definitions(assets=[other, actuals, manifest, model, spine])
+        @dg.asset(
+            key=self.reader_key, deps=[self.spine_key, self.model_key], automation_condition=rebuild
+        )
+        def reader(): ...
+
+        self.ods, self.models = [other, actuals, late], [captures, model, spine, reader]
+        self.defs = dg.Definitions(assets=[*self.ods, manifest, *self.models])
         self.instance = dg.DagsterInstance.ephemeral()
         self.cursor = None
 
     def requested(self):
         result = dg.evaluate_automation_conditions(self.defs, self.instance, cursor=self.cursor)
         self.cursor = result.cursor
-        keys = (self.model_key, self.spine_key)
-        return {key for key in keys if result.get_num_requested(key)}
+        return {key for key in self.all if result.get_num_requested(key)}
 
     def parse(self, day):
         dg.materialize(self.ods, partition_key=day, instance=self.instance)
@@ -241,16 +260,15 @@ class StandIns:
 
 def test_models_rebuild_after_any_parse_even_with_a_day_never_parsed():
     s = StandIns()
-    both = {s.model_key, s.spine_key}
     assert s.requested() == set()
     s.parse("2026-01-02")
-    assert s.requested() == both
+    assert s.requested() == s.all
     s.build()
     s.parse("2026-01-04")  # 2026-01-03 never parsed, as after a failed capture: no block
-    assert s.requested() == both
+    assert s.requested() == s.all
     s.build()
     s.parse("2026-01-02")  # an old day parsed again
-    assert s.requested() == both
+    assert s.requested() == s.all
 
 
 def test_models_wait_for_the_whole_parse_not_its_first_step():
@@ -264,7 +282,49 @@ def test_models_wait_for_the_whole_parse_not_its_first_step():
     s.parse("2026-01-02")
 
     assert seen == [set()]  # the manifest was updated, but the parse was still running
-    assert s.requested() == {s.model_key, s.spine_key}  # then both, together
+    assert s.requested() == s.all  # then all of them, together
+
+
+def test_no_model_builds_while_anything_upstream_of_it_is_being_parsed():
+    # On 2026-11-19 a tick fell in the last second of the parse run. The model's own ODS table
+    # was done, so it and its reader were requested, while the spine, further from the step
+    # still running than the guard looked, waited a tick: the reader was built on the old spine.
+    s = StandIns()
+    seen = []
+    s.during_late = lambda: seen.append(s.requested())
+    assert s.requested() == set()
+
+    s.parse("2026-01-02")
+
+    assert seen == [set()]  # the model's table was parsed, but another step was still running
+    assert s.requested() == s.all  # then all of them, in one run
+
+
+def steps_to_a_parse(graph, key, seen: dict) -> int | None:
+    """The longest way from an asset up to an ODS asset, which a parse builds, in steps along
+    the graph; None if no ODS asset is upstream of it."""
+    if key not in seen:
+        parents = graph.get(key).parent_keys
+        parsed = {a.key for a in ODS_ASSETS}
+        ways = [1 for parent in parents if parent in parsed] + [
+            1 + further
+            for parent in parents
+            if (further := steps_to_a_parse(graph, parent, seen)) is not None
+        ]
+        seen[key] = max(ways, default=None)
+    return seen[key]
+
+
+def test_the_guard_looks_as_far_upstream_as_any_model_is_from_a_parse():
+    graph, seen = defs.resolve_asset_graph(), {}
+    steps = {
+        spec.key: steps_to_a_parse(graph, spec.key, seen) or 0
+        for spec in dbt_models.specs
+        if spec.automation_condition
+    }
+    furthest = max(steps, key=steps.get)
+    assert steps[dg.AssetKey(["dwd", "dwd_source_captures"])] == 2  # through the manifest
+    assert steps[furthest] <= LEVELS, (furthest, steps[furthest])
 
 
 def test_a_replay_and_a_backtest_are_jobs_with_their_assets():
