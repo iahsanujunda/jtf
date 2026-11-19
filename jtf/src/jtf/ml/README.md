@@ -9,7 +9,7 @@ Models and the backtest that scores them. Features come from DWS and labels from
 | Metrics on daylight slots with a label, per fold and overall: MAE and bias as shares of the capacity at `T`, MAE in MW. The error itself is defined in SQL (`ads_ml_outcome_solar`) | [backtest.py](backtest.py) | Built |
 | Reading features, labels and outcomes; appending predictions to `ads_ml_prediction_solar` | [warehouse.py](warehouse.py) | Built |
 | MLflow, local: `mlflow.db` and `mlruns/` at the repository root (gitignored), experiment `solar-backtest`, one run per model per backtest | [tracking.py](tracking.py) | Built |
-| Skill against persistence, the clear-sky × ratio baseline, the TEPCO benchmark, M1 (LightGBM quantile models), pinball loss and coverage, metrics by segment | | Step 7 |
+| Skill against persistence, the seven-day mean baseline, the TEPCO benchmark, M1 (LightGBM quantile models), pinball loss and coverage, metrics by segment | | Step 7 |
 | Runs, the time machine's mechanism: a model over a range of target days in a mode (`backtest`, `what-if`, `reproduce`), its predictions appended to ADS and its record to `ads_ml_runs`, with its code (git commit, whether the tree was clean, image digest), its fidelity counts over the inputs its model reads (`dws_fidelity`) and fingerprints of the features it read and the predictions it wrote. A reproduce refuses other code and fails unless both fingerprints match, saying whether the data or the code changed | [replay.py](replay.py) | Built |
 | M2 price model | | Phase 4 |
 
