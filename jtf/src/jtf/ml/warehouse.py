@@ -15,7 +15,15 @@ RUNS = "ads_ml_runs"
 # What every run reads of the features beside its model's own columns, and the part of its
 # predictions a reproduce must match: not its run ID or mode, which differ by design
 KEY_COLUMNS = ["decision_time", "target_day", "slot_start"]
-OUTPUT_COLUMNS = ["model", "decision_time", "target_day", "slot_start", "predicted_mw"]
+OUTPUT_COLUMNS = [
+    "model",
+    "decision_time",
+    "target_day",
+    "slot_start",
+    "predicted_mw",
+    "p10_mw",
+    "p90_mw",
+]
 
 PREDICTION_SCHEMA = [
     bigquery.SchemaField("run_id", "STRING", mode="REQUIRED"),
@@ -26,7 +34,11 @@ PREDICTION_SCHEMA = [
     bigquery.SchemaField("target_day", "DATE", mode="REQUIRED"),
     bigquery.SchemaField("slot_start", "TIMESTAMP", mode="REQUIRED"),
     bigquery.SchemaField("predicted_mw", "FLOAT", mode="NULLABLE"),
+    bigquery.SchemaField("p10_mw", "FLOAT", mode="NULLABLE"),
+    bigquery.SchemaField("p90_mw", "FLOAT", mode="NULLABLE"),
 ]
+# A table made before a column was added gains it at the next append
+GROWS = [bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION]
 
 
 RUN_SCHEMA = [
@@ -46,6 +58,7 @@ RUN_SCHEMA = [
     bigquery.SchemaField("fault", "STRING"),
     bigquery.SchemaField("inputs_fingerprint", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("outputs_fingerprint", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("training_fingerprint", "STRING"),
     bigquery.SchemaField("started_at", "TIMESTAMP", mode="REQUIRED"),
     bigquery.SchemaField("finished_at", "TIMESTAMP", mode="REQUIRED"),
 ]
@@ -107,6 +120,30 @@ class BacktestWarehouse:
             "fingerprint"
         ].iloc[0]
 
+    def _training_rows(self, columns: tuple[str, ...]) -> str:
+        """Every labelled slot with its keys, `columns`, label and daylight flag, as a query."""
+        return f"""
+            select {", ".join(f"f.{c}" for c in [*KEY_COLUMNS, *columns])}, l.label_mw,
+                not d.is_night as is_daylight
+            from `{self.table("dws", "dws_solar_features")}` as f
+            inner join `{self.table("ads", "ads_ml_label_solar")}` as l using (slot_start)
+            inner join `{self.table("dim", "dim_daylight")}` as d using (slot_start)
+            where f.target_day <= @last and l.label_mw is not null
+        """
+
+    def training(self, last_day: date, columns: tuple[str, ...]) -> pd.DataFrame:
+        """What a model may be trained on: every labelled slot of the target days up to
+        `last_day`, sorted so that the same days always give the same frame."""
+        sql = f"{self._training_rows(columns)} order by decision_time, slot_start"
+        return self._query(sql, last=("DATE", last_day))
+
+    def training_fingerprint(self, last_day: date, columns: tuple[str, ...]) -> str:
+        """Those rows fingerprinted, labels included: a label revised later shows as changed."""
+        names = [*KEY_COLUMNS, *columns, "label_mw", "is_daylight"]
+        rows = self._training_rows(columns)
+        sql = f"select {fingerprint_of(names)} as fingerprint from ({rows}) as t"
+        return self._query(sql, last=("DATE", last_day))["fingerprint"].iloc[0]
+
     def outputs_fingerprint(self, run_id: str) -> str:
         """A run's predictions fingerprinted, without its run ID and mode."""
         sql = f"""
@@ -138,7 +175,9 @@ class BacktestWarehouse:
     def append_run(self, record: pd.DataFrame) -> None:
         """Append one run's record; ads_ml_runs is append-only, like the predictions."""
         config = bigquery.LoadJobConfig(
-            schema=RUN_SCHEMA, write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+            schema=RUN_SCHEMA,
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            schema_update_options=GROWS,
         )
         self.client.load_table_from_dataframe(
             record, self.table("ads", RUNS), job_config=config
@@ -160,6 +199,7 @@ class BacktestWarehouse:
         config = bigquery.LoadJobConfig(
             schema=PREDICTION_SCHEMA,
             write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            schema_update_options=GROWS,
             clustering_fields=["run_id"],
         )
         table = self.table("ads", PREDICTIONS)
@@ -170,7 +210,7 @@ class BacktestWarehouse:
         time."""
         sql = f"""
             select fold, decision_time, target_day, slot_start, error_mw, error_share,
-                is_daylight, sky, is_curtailed_day, season
+                is_daylight, in_range, pinball_share, sky, is_curtailed_day, season
             from `{self.table("ads", "ads_ml_outcome_solar")}`
             where run_id = @run_id
             order by fold, decision_time, slot_start

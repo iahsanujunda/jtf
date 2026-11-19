@@ -5,7 +5,9 @@
   across the years the fleet grew. A prediction whose slot has no actual yet keeps its row, with
   no label and no error. is_daylight is the metrics' filter (dim_daylight). sky, is_curtailed_day
   and season are the groups results are read by (ads_ml_day_solar): the target day's, with no sky
-  until that day's 14 later days are whole.
+  until that day's 14 later days are whole. A prediction with a range (p10_mw, p90_mw) also says
+  whether the label fell inside it, and its pinball loss: the mean over its three forecasts, in a
+  fixed order. A prediction without a range has neither.
 #}
 {{ config(cluster_by=['run_id', 'slot_start']) }}
 
@@ -18,11 +20,22 @@ select
     p.target_day,
     p.slot_start,
     p.predicted_mw,
+    p.p10_mw,
+    p.p90_mw,
     l.label_mw,
     p.predicted_mw - l.label_mw as error_mw,
     c.capacity_mw,
     safe_divide(p.predicted_mw - l.label_mw, c.capacity_mw) as error_share,
     not d.is_night as is_daylight,
+    l.label_mw between p.p10_mw and p.p90_mw as in_range,
+    safe_divide(
+        (
+            {{ pinball(0.1, 'l.label_mw', 'p.p10_mw') }}
+            + {{ pinball(0.5, 'l.label_mw', 'p.predicted_mw') }}
+            + {{ pinball(0.9, 'l.label_mw', 'p.p90_mw') }}
+        ) / 3,
+        c.capacity_mw
+    ) as pinball_share,
     g.sky,
     g.is_curtailed as is_curtailed_day,
     g.season

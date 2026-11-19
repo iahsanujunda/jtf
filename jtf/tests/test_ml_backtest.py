@@ -133,3 +133,35 @@ def test_metrics_per_kind_of_day_reach_mlflow_under_names_that_say_which():
         f"sky/{NOT_YET}/mae_share": 0.11, f"sky/{NOT_YET}/bias_share": -0.02,
         f"sky/{NOT_YET}/mae_mw": 2200.0,
     }  # fmt: skip
+
+
+def test_a_run_with_a_range_is_also_scored_by_its_coverage_and_pinball_loss():
+    # Four daylight slots: the label inside the range in three. A night slot and a slot with no
+    # label count nowhere. A run without a range has neither score.
+    outcomes = pd.DataFrame(
+        {
+            "fold": [date(2025, 3, 1)] * 6,
+            "target_day": [date(2025, 3, 1)] * 6,
+            "error_mw": [100.0, -300.0, 50.0, 600.0, 200.0, None],
+            "error_share": [0.005, -0.015, 0.0025, 0.03, 0.01, None],
+            "is_daylight": [True, True, False, True, True, True],
+            "in_range": [True, True, True, False, True, None],
+            "pinball_share": [0.002, 0.004, 0.001, 0.02, 0.006, None],
+            "sky": ["clear"] * 6,
+            "is_curtailed_day": [False] * 6,
+            "season": ["spring"] * 6,
+        }
+    )
+    per_fold, overall = metrics(outcomes)
+    assert overall["coverage"] == pytest.approx(0.75)
+    assert overall["pinball_share"] == pytest.approx(0.008)
+    assert per_fold["coverage"].tolist() == pytest.approx([0.75])
+    assert (
+        by_group(outcomes).set_index(["grouping", "group"]).loc[("sky", "clear"), "coverage"]
+        == 0.75
+    )
+    assert group_metrics(by_group(outcomes))["sky/clear/pinball_share"] == pytest.approx(0.008)
+
+    no_range = outcomes.drop(columns=["in_range", "pinball_share"])
+    assert set(metrics(no_range)[1]) == {"slots", "mae_share", "bias_share", "mae_mw"}
+    assert "coverage" not in by_group(no_range) and "coverage" not in metrics(no_range)[0]

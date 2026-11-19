@@ -12,6 +12,7 @@ import pandas as pd
 
 PERSISTENCE = "persistence_d2"
 MEAN_7D = "mean_7d"
+MEAN_7D_RANGE = "mean_7d_range"
 FIRST_TEST_MONTH = date(2025, 3, 1)
 BACKTEST = "backtest"
 
@@ -24,7 +25,11 @@ PREDICTION_COLUMNS = [
     "target_day",
     "slot_start",
     "predicted_mw",
+    "p10_mw",
+    "p90_mw",
 ]
+# The three forecasts of a slot, low to high: the middle one is the point forecast
+QUANTILES = ["p10_mw", "predicted_mw", "p90_mw"]
 
 
 def month(text: str) -> date:
@@ -53,7 +58,12 @@ def persistence(features: pd.DataFrame, run_id: str) -> pd.DataFrame:
     """The same slot on D−2, the newest day complete at T: the baseline every model must beat.
     `features` holds `dws_solar_features` rows with their fold."""
     return features.assign(
-        run_id=run_id, model=PERSISTENCE, mode=BACKTEST, predicted_mw=features["solar_d2_mw"]
+        run_id=run_id,
+        model=PERSISTENCE,
+        mode=BACKTEST,
+        predicted_mw=features["solar_d2_mw"],
+        p10_mw=float("nan"),
+        p90_mw=float("nan"),
     )[PREDICTION_COLUMNS]
 
 
@@ -62,20 +72,36 @@ AGGREGATES = {
     "mae_share": ("abs_share", "mean"),
     "bias_share": ("error_share", "mean"),
     "mae_mw": ("abs_mw", "mean"),
+    "coverage": ("inside", "mean"),
+    "pinball_share": ("pinball_share", "mean"),
 }
+RANGE = ["in_range", "pinball_share"]  # what only a prediction with a range has
+
+
+def _scored(outcomes: pd.DataFrame) -> pd.DataFrame:
+    """The daylight slots with a label, with what the aggregates read. `coverage` is the share of
+    them whose label fell inside the range, to set against the 80% a P10 to P90 range should
+    hold; it and the pinball loss are empty for a run with no range."""
+    outcomes = outcomes.reindex(columns=outcomes.columns.union(RANGE, sort=False))
+    scored = outcomes[outcomes["is_daylight"].eq(True) & outcomes["error_mw"].notna()]
+    return scored.assign(
+        abs_share=scored["error_share"].abs(),
+        abs_mw=scored["error_mw"].abs(),
+        inside=scored["in_range"].astype("boolean").astype("Float64").astype(float),
+        pinball_share=scored["pinball_share"].astype(float),
+    )
 
 
 def metrics(outcomes: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
     """Per fold and overall, over daylight slots with a label (plan, Metrics): MAE and bias as a
-    share of the capacity at each decision time (`error_share` from ads_ml_outcome_solar), and
-    MAE in MW. `outcomes` must come sorted, so the means add the same floats in the same order
-    every run.
+    share of the capacity at each decision time (`error_share` from ads_ml_outcome_solar), MAE
+    in MW, and for a run with a range its coverage and pinball loss. `outcomes` must come sorted,
+    so the means add the same floats in the same order every run.
     """
-    scored = outcomes[outcomes["is_daylight"].eq(True) & outcomes["error_mw"].notna()]
-    scored = scored.assign(abs_share=scored["error_share"].abs(), abs_mw=scored["error_mw"].abs())
-    per_fold = scored.groupby("fold").agg(**AGGREGATES).reset_index()
+    scored = _scored(outcomes)
+    per_fold = scored.groupby("fold").agg(**AGGREGATES).dropna(axis=1, how="all").reset_index()
     overall = scored.groupby(lambda _: "overall").agg(**AGGREGATES).iloc[0]
-    return per_fold, {name: float(value) for name, value in overall.items()}
+    return per_fold, {name: float(value) for name, value in overall.items() if pd.notna(value)}
 
 
 NOT_YET = "not yet grouped"
@@ -87,20 +113,21 @@ def by_group(outcomes: pd.DataFrame) -> pd.DataFrame:
     cloudy), by whether it was curtailed, and by season, as ads_ml_outcome_solar has them. One row
     per grouping and group, with its days. A day whose sky isn't set yet, its 14 later days not
     being whole, counts under `NOT_YET`: every grouping covers every scored slot once."""
-    scored = outcomes[outcomes["is_daylight"].eq(True) & outcomes["error_mw"].notna()]
-    scored = scored.assign(
-        abs_share=scored["error_share"].abs(),
-        abs_mw=scored["error_mw"].abs(),
-        curtailed=scored["is_curtailed_day"].map(CURTAILED),
-    )
+    scored = _scored(outcomes)
+    scored = scored.assign(curtailed=scored["is_curtailed_day"].map(CURTAILED))
     long = scored.melt(
-        id_vars=["target_day", "error_mw", "error_share", "abs_share", "abs_mw"],
+        id_vars=[
+            "target_day",
+            "error_mw",
+            "error_share",
+            "abs_share",
+            "abs_mw",
+            "inside",
+            "pinball_share",
+        ],
         value_vars=["sky", "curtailed", "season"],
         var_name="grouping",
         value_name="group",
     ).fillna({"group": NOT_YET})
-    return (
-        long.groupby(["grouping", "group"])
-        .agg(days=("target_day", "nunique"), **AGGREGATES)
-        .reset_index()
-    )
+    groups = long.groupby(["grouping", "group"]).agg(days=("target_day", "nunique"), **AGGREGATES)
+    return groups.dropna(axis=1, how="all").reset_index()  # no range, no range scores

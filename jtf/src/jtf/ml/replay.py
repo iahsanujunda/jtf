@@ -5,6 +5,10 @@
 - `what-if`: any range of target days, with the code checked out now
 - `reproduce`: an earlier run again, which must match it exactly
 
+A model is a rule over the features, or is trained: then a run trains it once per month of target
+days, on the labelled days known when that month began, and predicts the month from that
+training. A reproduce trains again; no stored file is ever read back (plan, Decisions).
+
 A run reads the features its model names, for its target days, from DWS (as known at each decision
 time: DWS reads DWD through `as_of`), predicts, appends its predictions to ADS under its run ID, and
 records itself: its code, its fidelity per decision time (`dws_fidelity`, counted over the inputs
@@ -17,14 +21,17 @@ records nothing; Dagster keeps the failure.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Protocol
 
+import numpy as np
 import pandas as pd
 
-from jtf.ml.backtest import MEAN_7D, PERSISTENCE, PREDICTION_COLUMNS
+from jtf.ml.backtest import MEAN_7D, MEAN_7D_RANGE, PERSISTENCE, PREDICTION_COLUMNS, QUANTILES
+from jtf.ml.models import train_miss_by_hour
 
 MODES = ("backtest", "what-if", "reproduce")
 RUN_COLUMNS = [
@@ -44,18 +51,36 @@ RUN_COLUMNS = [
     "fault",
     "inputs_fingerprint",
     "outputs_fingerprint",
+    "training_fingerprint",
     "started_at",
     "finished_at",
 ]
 
 
+class Trained(Protocol):
+    """What a model learned from one training."""
+
+    summary: dict[str, float]  # how the training went, for its log
+
+    def predict(self, features: pd.DataFrame) -> pd.DataFrame:
+        """QUANTILES for each row of `features`, on its index."""
+        ...
+
+    def dump(self) -> str:
+        """Everything it learned, as text: kept with the run and hashed."""
+        ...
+
+
 @dataclass(frozen=True)
 class Model:
+    """A rule over the features (`predict`), or a model trained on the past (`train`)."""
+
     name: str
     version: str
     features: tuple[str, ...]  # the columns of dws_solar_features it reads, and no others
     inputs: tuple[str, ...]  # what those are made from, as dws_fidelity names them
-    predict: Callable[[pd.DataFrame], pd.Series]
+    predict: Callable[[pd.DataFrame], pd.Series] | None = None
+    train: Callable[[pd.DataFrame], Trained] | None = None
 
 
 MODELS = {
@@ -68,7 +93,22 @@ MODELS = {
     MEAN_7D: Model(
         MEAN_7D, "1", ("solar_mean_7d_mw",), ("actuals_7d",), lambda f: f["solar_mean_7d_mw"]
     ),
+    # The seven-day mean with a range learned from its past misses: the simplest trained model
+    MEAN_7D_RANGE: Model(
+        MEAN_7D_RANGE,
+        "1",
+        ("solar_mean_7d_mw", "capacity_mw"),
+        ("actuals_7d", "capacity"),
+        train=train_miss_by_hour,
+    ),
 }
+
+
+def training_cutoff(month: date) -> date:
+    """The newest target day a model used from the first day of `month` may learn from: two days
+    before the month starts. At that first day's decision time, 09:00 the day before, the newest
+    day whose labels are all known is two days back (notebook 04, section 5.3)."""
+    return month - timedelta(days=2)
 
 
 def target_day(decision_time) -> date:
@@ -95,6 +135,13 @@ class RunWarehouse(Protocol):
 
     def append_predictions(self, rows: pd.DataFrame) -> None: ...
     def outputs_fingerprint(self, run_id: str) -> str: ...
+    def training(self, last_day: date, columns: tuple[str, ...]) -> pd.DataFrame:
+        """Every labelled slot of the target days up to `last_day`: the keys, `columns`, the
+        label and whether the slot is daylight, sorted."""
+        ...
+
+    def training_fingerprint(self, last_day: date, columns: tuple[str, ...]) -> str: ...
+
     def fidelity(self, first_day: date, last_day: date, inputs: tuple[str, ...]) -> pd.Series:
         """Per decision time of the target days, whether every input is exact."""
         ...
@@ -129,9 +176,13 @@ def run(
     features = warehouse.features(first_day, last_day, spec.features)
     if features.empty:
         raise Refused(f"no features for target days {first_day} to {last_day}")
-    rows = features.assign(
-        run_id=run_id, model=spec.name, mode=mode, predicted_mw=spec.predict(features)
-    )[PREDICTION_COLUMNS]
+    if spec.train:
+        said, trainings, learned_until = _train_and_predict(warehouse, spec, features)
+        training_fingerprint = warehouse.training_fingerprint(learned_until, spec.features)
+    else:
+        said = pd.DataFrame({"predicted_mw": spec.predict(features)}).reindex(columns=QUANTILES)
+        trainings, training_fingerprint = [], None
+    rows = features.assign(run_id=run_id, model=spec.name, mode=mode, **said)[PREDICTION_COLUMNS]
     warehouse.append_predictions(rows)
     exact = warehouse.fidelity(first_day, last_day, spec.inputs)
     record = {
@@ -151,11 +202,46 @@ def run(
         "fault": fault,
         "inputs_fingerprint": warehouse.inputs_fingerprint(first_day, last_day, spec.features),
         "outputs_fingerprint": warehouse.outputs_fingerprint(run_id),
+        "training_fingerprint": training_fingerprint,
         "started_at": started,
         "finished_at": now(),
     }
     warehouse.append_run(pd.DataFrame([record], columns=RUN_COLUMNS))
-    return record
+    return record | {"trainings": trainings}
+
+
+def _train_and_predict(
+    warehouse: RunWarehouse, spec: Model, features: pd.DataFrame
+) -> tuple[pd.DataFrame, list[dict], date]:
+    """One training per month of target days, each on what was known when the month began, and
+    that month's predictions from it. The three forecasts of a slot are sorted, so that a low
+    never lies above a high. Returns the predictions on `features`' index, what each training
+    was (its month, its last day, its size, its file and the file's hash, its summary), and the
+    last day any of them learned from."""
+    months = sorted(set(features["fold"]))
+    learned_until = training_cutoff(months[-1])
+    known = warehouse.training(learned_until, spec.features)
+    parts, trainings = [], []
+    for month in months:  # a model each: a handful of months, not a row at a time
+        past = known[known["target_day"] <= training_cutoff(month)]
+        if past.empty:
+            raise Refused(f"nothing to train {spec.name} on before {month}")
+        learned = spec.train(past)
+        asked = features[features["fold"] == month]
+        said = learned.predict(asked)[QUANTILES].to_numpy(float)
+        parts.append(pd.DataFrame(np.sort(said, axis=1), index=asked.index, columns=QUANTILES))
+        file = learned.dump()
+        trainings.append(
+            {
+                "fold": month,
+                "last_training_day": training_cutoff(month),
+                "rows": len(past),
+                "sha256": hashlib.sha256(file.encode()).hexdigest(),
+                "file": file,
+                **learned.summary,
+            }
+        )
+    return pd.concat(parts).reindex(features.index), trainings, learned_until
 
 
 def reproduce(
@@ -186,10 +272,23 @@ def reproduce(
         now=now,
         reproduces=original,
     )
-    differ = [
-        side for side in ("inputs_fingerprint", "outputs_fingerprint") if record[side] != then[side]
-    ]
+    differ = [side for side in CAUSES if not _same(record.get(side), then.get(side))]
     if differ:
-        cause = "the data changed" if "inputs_fingerprint" in differ else "the code did"
-        raise Mismatch(f"run {run_id} does not reproduce {original}: {', '.join(differ)} ({cause})")
+        raise Mismatch(
+            f"run {run_id} does not reproduce {original}: {', '.join(differ)} ({CAUSES[differ[0]]})"
+        )
     return record
+
+
+# What a reproduce compares, in the order a difference is blamed: the features it read, what it
+# was trained on, and only then its predictions, which the same inputs can change only by code
+CAUSES = {
+    "inputs_fingerprint": "the data changed",
+    "training_fingerprint": "the training data changed",
+    "outputs_fingerprint": "the code did",
+}
+
+
+def _same(now: object, then: object) -> bool:
+    """Equal, or both missing: a model that isn't trained has no training fingerprint."""
+    return (pd.isna(now) and pd.isna(then)) or now == then

@@ -12,6 +12,9 @@ import pandas as pd
 
 REPO = Path(__file__).resolve().parents[4]
 EXPERIMENT = "solar-backtest"
+TRAININGS = "solar-training"
+# What a backtest is scored by; the last two only for a run with a range
+SCORES = ["mae_share", "bias_share", "mae_mw", "coverage", "pinball_share"]
 
 
 def tracking_uri() -> str:
@@ -40,11 +43,60 @@ def run_code() -> dict[str, str]:
 
 def group_metrics(groups: pd.DataFrame) -> dict[str, float]:
     """A backtest's metrics per kind of day, named `<grouping>/<group>/<metric>`."""
-    long = groups.melt(
-        id_vars=["grouping", "group"], value_vars=["mae_share", "bias_share", "mae_mw"]
-    )
+    scores = [name for name in SCORES if name in groups]
+    long = groups.melt(id_vars=["grouping", "group"], value_vars=scores).dropna(subset="value")
     names = long["grouping"] + "/" + long["group"] + "/" + long["variable"]
     return dict(zip(names, long["value"].astype(float), strict=True))
+
+
+def log_trainings(*, run_id: str, model: str, trainings: list[dict]) -> str:
+    """One MLflow run for the trainings of one run of a trained model: per month of target days,
+    what it learned from (its last day, its size), how the training went, the trained model's
+    file and the file's hash. The files are for looking into a past month's model: a reproduce
+    trains again and never reads them. Returns MLflow's run ID."""
+    import mlflow
+    from mlflow.entities import Metric
+
+    mlflow.set_tracking_uri(tracking_uri())
+    client = mlflow.MlflowClient()
+    experiment = client.get_experiment_by_name(TRAININGS)
+    experiment_id = (
+        experiment.experiment_id
+        if experiment
+        else client.create_experiment(TRAININGS, artifact_location=(REPO / "mlruns").as_uri())
+    )
+    table = pd.DataFrame(trainings).drop(columns="file")
+    numbers = table.drop(columns=["fold", "last_training_day", "sha256"])
+    with mlflow.start_run(experiment_id=experiment_id, run_name=f"{model} {run_id[:8]}") as run:
+        mlflow.set_tags(
+            {
+                "dagster_run_id": run_id,
+                "model": model,
+                "image_digest": os.environ.get("JTF_IMAGE_DIGEST", ""),
+                **git_state(),
+            }
+        )
+        mlflow.log_params(
+            {
+                "trainings": len(table),
+                "first_fold": str(table["fold"].iloc[0]),
+                "last_fold": str(table["fold"].iloc[-1]),
+            }
+        )
+        now = int(time.time() * 1000)
+        long = numbers.reset_index().melt(id_vars="index").dropna(subset="value")
+        client.log_batch(
+            run.info.run_id,
+            metrics=[
+                Metric(key=name, value=float(value), timestamp=now, step=int(step))
+                for step, name, value in long.itertuples(index=False)
+            ],
+        )
+        mlflow.log_text(table.to_csv(index=False), "trainings.csv")
+        names = "models/" + table["fold"].astype(str) + ".txt"
+        files = [training["file"] for training in trainings]
+        [mlflow.log_text(file, name) for file, name in zip(files, names, strict=True)]
+    return run.info.run_id
 
 
 def log_backtest(
@@ -99,7 +151,8 @@ def log_backtest(
             run.info.run_id,
             metrics=[
                 Metric(key=f"fold_{name}", value=float(value), timestamp=now, step=step)
-                for name in ("mae_share", "bias_share", "mae_mw")
+                for name in SCORES
+                if name in per_fold
                 for step, value in enumerate(per_fold[name])
             ],
         )
