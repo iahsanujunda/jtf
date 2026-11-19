@@ -85,7 +85,9 @@ grid as (
 gridded as (
     select
         g.*,
-        c.lead_days,
+        -- A model with no row of its own for the slot takes the lead of the models that have one:
+        -- its values come from them, at that lead (previous_runs keeps lead 2 only)
+        coalesce(c.lead_days, max(c.lead_days) over slot_at_point) as lead_days,
         c.run_time,
         c.captured_at,
         {%- for v in variables %}
@@ -97,7 +99,7 @@ gridded as (
         {%- endfor %}
         array_agg(struct(
             g.model as peer, g.fill_order, {% for v in variables %}c.{{ v }}{{ ', ' if not loop.last }}{% endfor %}
-        )) over (partition by g.decision_time, g.source, g.slot_start, g.point) as peers
+        )) over slot_at_point as peers
     from grid as g
     left join chosen_series as c
         on c.decision_time = g.decision_time
@@ -105,6 +107,7 @@ gridded as (
         and c.slot_start = g.slot_start
         and c.point = g.point
         and c.model = g.model
+    window slot_at_point as (partition by g.decision_time, g.source, g.slot_start, g.point)
 ),
 
 filled as (

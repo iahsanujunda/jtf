@@ -44,6 +44,16 @@ models:
       - name: capacity_mw
         description: Installed solar on D as estimated at T (dws_capacity).
         data_tests: [not_null]
+      - name: forecast_ghi_w_m2
+        description: >
+          The forecast radiation on the ground for the slot, W/m², known at T: MSM's, the nine
+          points weighted by their share of capacity (dws_weather_area). So are
+          forecast_direct_w_m2, forecast_diffuse_w_m2, forecast_cloud_cover_pct and
+          forecast_temperature_c.
+      - name: forecast_ghi_mean_7d_w_m2
+        description: >
+          The mean of forecast_ghi_w_m2 for the same slot on the target days D−8 to D−2, each as
+          its own decision time knew it; null unless all seven exist.
       - name: clear_sky_mw
         description: >
           Output a cloudless slot would allow: capacity × the capacity-weighted clear-sky radiation
@@ -158,6 +168,25 @@ models:
           arguments:
             expression: (ghi_w_m2 is null) = (ghi_w_m2_model is null) and (temperature_c is null) = (temperature_c_model is null)
 
+  - name: dws_weather_area
+    description: >
+      The weather forecast at T for the whole area, per decision time and slot: MSM's variables,
+      the nine points weighted by their share of solar capacity as known at T.
+    columns:
+      - name: decision_time
+        data_tests: [not_null]
+      - name: slot_start
+        data_tests: [unique, not_null]
+      - name: ghi_w_m2
+        description: Forecast radiation on the ground, W/m²; empty where any point lacks it.
+      - name: points
+        description: The points the figure was made from.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [9]
+                quote: false
+
   - name: dws_fidelity
     description: >
       How exact each decision time's inputs are: per decision time and input (actuals_d2, actuals_7d,
@@ -222,6 +251,8 @@ unit_tests:
         rows: []
       - input: ref('dim_sun_slots')
         rows: []
+      - input: ref('dws_weather_area')
+        rows: []
     expect:
       rows:
         - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:00:00+00", solar_d2_mw: 5000}
@@ -276,6 +307,8 @@ unit_tests:
       - input: ref('dws_point_weights')
         rows: []
       - input: ref('dim_sun_slots')
+        rows: []
+      - input: ref('dws_weather_area')
         rows: []
     expect:
       rows:
@@ -385,6 +418,8 @@ unit_tests:
           - {point: numazu, slot_start: "2026-11-17 03:00:00+00", clear_sky_ghi: 400}
           - {point: mito, slot_start: "2026-11-16 15:00:00+00", clear_sky_ghi: 0}
           - {point: numazu, slot_start: "2026-11-16 15:00:00+00", clear_sky_ghi: 0}
+      - input: ref('dws_weather_area')
+        rows: []
     expect:
       rows:
         - {slot_start: "2026-11-17 03:00:00+00", capacity_mw: 20000, clear_sky_mw: 14000}
@@ -448,8 +483,8 @@ unit_tests:
   - name: a_hole_is_filled_from_the_next_model_of_the_same_source
     description: >
       D is 11 November. Lead 2 has no MSM hour for the daylight slot, as on that morning in 2026:
-      ECMWF's value fills it, recorded as ECMWF's, and lead 2 still covers D. A Single Run that
-      also covers D comes after lead 2. GSM's radiation stays empty: it has none to fill.
+      ECMWF's value fills it, recorded as ECMWF's, at ECMWF's lead, and lead 2 still covers D. A
+      Single Run that also covers D comes after lead 2. GSM's radiation stays empty: it has none to fill.
     model: dws_weather
     given:
       - input: ref('dws_decision_slots')
@@ -483,12 +518,12 @@ unit_tests:
           - {source: single_runs, point: tokyo, model: jma_gsm, lead_days: null, run_time: "2026-11-08 18:00:00+00", captured_at: null, slot_start: "2026-11-10 15:00:00+00", ghi_w_m2: null, direct_w_m2: null, diffuse_w_m2: null, cloud_cover_pct: 50, temperature_c: 30, wind_speed_kmh: 10, known_at: "2026-11-08 21:00:00+00", known_until: null, basis: rule}
     expect:
       rows:
-        - {slot_start: "2026-11-11 03:00:00+00", model: jma_msm, source: previous_runs, ghi_w_m2: 420, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025}
-        - {slot_start: "2026-11-10 15:00:00+00", model: jma_msm, source: previous_runs, ghi_w_m2: 0, ghi_w_m2_model: jma_msm, temperature_c: 8, temperature_c_model: jma_msm}
-        - {slot_start: "2026-11-11 03:00:00+00", model: ecmwf_ifs025, source: previous_runs, ghi_w_m2: 420, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025}
-        - {slot_start: "2026-11-10 15:00:00+00", model: ecmwf_ifs025, source: previous_runs, ghi_w_m2: 0, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025}
-        - {slot_start: "2026-11-11 03:00:00+00", model: jma_gsm, source: previous_runs, ghi_w_m2: null, ghi_w_m2_model: null, temperature_c: 12, temperature_c_model: jma_gsm}
-        - {slot_start: "2026-11-10 15:00:00+00", model: jma_gsm, source: previous_runs, ghi_w_m2: null, ghi_w_m2_model: null, temperature_c: 12, temperature_c_model: jma_gsm}
+        - {slot_start: "2026-11-11 03:00:00+00", model: jma_msm, source: previous_runs, ghi_w_m2: 420, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025, lead_days: 2}
+        - {slot_start: "2026-11-10 15:00:00+00", model: jma_msm, source: previous_runs, ghi_w_m2: 0, ghi_w_m2_model: jma_msm, temperature_c: 8, temperature_c_model: jma_msm, lead_days: 2}
+        - {slot_start: "2026-11-11 03:00:00+00", model: ecmwf_ifs025, source: previous_runs, ghi_w_m2: 420, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025, lead_days: 2}
+        - {slot_start: "2026-11-10 15:00:00+00", model: ecmwf_ifs025, source: previous_runs, ghi_w_m2: 0, ghi_w_m2_model: ecmwf_ifs025, temperature_c: 12, temperature_c_model: ecmwf_ifs025, lead_days: 2}
+        - {slot_start: "2026-11-11 03:00:00+00", model: jma_gsm, source: previous_runs, ghi_w_m2: null, ghi_w_m2_model: null, temperature_c: 12, temperature_c_model: jma_gsm, lead_days: 2}
+        - {slot_start: "2026-11-10 15:00:00+00", model: jma_gsm, source: previous_runs, ghi_w_m2: null, ghi_w_m2_model: null, temperature_c: 12, temperature_c_model: jma_gsm, lead_days: 2}
 
   - name: a_partial_source_is_passed_over_for_the_run_known_before_t
     description: >
@@ -612,3 +647,61 @@ unit_tests:
         - {decision_time: "2026-11-17 00:00:00+00", input: actuals_7d, versions_read: 5, approximate_versions: 1, fidelity: approximate}
         - {decision_time: "2026-11-17 00:00:00+00", input: weather, versions_read: 1, approximate_versions: 0, fidelity: exact}
         - {decision_time: "2026-11-17 00:00:00+00", input: capacity, versions_read: 1, approximate_versions: 0, fidelity: exact}
+
+  # The area's weather. T is 09:00 JST on 2026-11-16; one slot, two points, weights 0.75 and 0.25.
+  - name: the_areas_forecast_is_msm_weighted_by_each_points_share_of_capacity
+    description: >
+      At 12:00 JST: mito (weight 0.75) is forecast 800 W/m² and 20 °C, numazu (0.25) 400 W/m² and
+      12 °C: 700 W/m² and 18 °C for the area. ECMWF's 999 is another model's. At 12:30 numazu has
+      no radiation: the area has none either, never mito's 600 alone; its temperature stands.
+    model: dws_weather_area
+    given:
+      - input: ref('dws_point_weights')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", point: mito, weight: 0.75}
+          - {decision_time: "2026-11-16 00:00:00+00", point: numazu, weight: 0.25}
+      - input: ref('dws_weather')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:00:00+00", point: mito, model: jma_msm, ghi_w_m2: 800, direct_w_m2: 600, diffuse_w_m2: 200, cloud_cover_pct: 10, temperature_c: 20, wind_speed_kmh: 8}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:00:00+00", point: numazu, model: jma_msm, ghi_w_m2: 400, direct_w_m2: 200, diffuse_w_m2: 200, cloud_cover_pct: 50, temperature_c: 12, wind_speed_kmh: 16}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:00:00+00", point: mito, model: ecmwf_ifs025, ghi_w_m2: 999, direct_w_m2: 999, diffuse_w_m2: 999, cloud_cover_pct: 99, temperature_c: 99, wind_speed_kmh: 99}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:30:00+00", point: mito, model: jma_msm, ghi_w_m2: 600, direct_w_m2: 400, diffuse_w_m2: 200, cloud_cover_pct: 10, temperature_c: 20, wind_speed_kmh: 8}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:30:00+00", point: numazu, model: jma_msm, ghi_w_m2: null, direct_w_m2: 200, diffuse_w_m2: 200, cloud_cover_pct: 50, temperature_c: 12, wind_speed_kmh: 16}
+    expect:
+      rows:
+        - {slot_start: "2026-11-17 03:00:00+00", ghi_w_m2: 700, direct_w_m2: 500, diffuse_w_m2: 200, cloud_cover_pct: 20, temperature_c: 18, wind_speed_kmh: 10, points: 2}
+        - {slot_start: "2026-11-17 03:30:00+00", ghi_w_m2: null, direct_w_m2: 350, diffuse_w_m2: 200, cloud_cover_pct: 20, temperature_c: 18, wind_speed_kmh: 10, points: 2}
+
+  - name: the_forecast_week_is_the_same_slot_on_the_target_days_d8_to_d2
+    description: >
+      Slot 12:00 on the 17th: forecast 630 W/m²; the forecasts for the same slot on the 9th to the
+      15th were 700, 600, 500, 400, 300, 200 and 100, a mean of 400. The 8th (7,000) and the 16th
+      (9,000) are outside the week. Slot 12:30 has six of the seven days: no mean.
+    model: dws_solar_features
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:00:00+00"}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:30:00+00"}
+      - input: ref('dws_weather_area')
+        format: sql
+        rows: |
+          select timestamp(datetime(2026, 11, day, 3, minute, 0)) as slot_start,
+            timestamp(datetime(2026, 11, day - 1, 0, 0, 0)) as decision_time,
+            cast([7000, 700, 600, 500, 400, 300, 200, 100, 9000, 630][offset(day - 8)] as float64) as ghi_w_m2,
+            100.0 as direct_w_m2, 50.0 as diffuse_w_m2, 30.0 as cloud_cover_pct, 15.0 as temperature_c
+          from unnest(generate_array(8, 17)) as day cross join unnest([0, 30]) as minute
+          where not (day = 12 and minute = 30)
+      - input: ref('dwd_tepco_actuals')
+        rows: []
+      - input: ref('dws_capacity')
+        rows: []
+      - input: ref('dws_point_weights')
+        rows: []
+      - input: ref('dim_sun_slots')
+        rows: []
+    expect:
+      rows:
+        - {slot_start: "2026-11-17 03:00:00+00", forecast_ghi_w_m2: 630, forecast_direct_w_m2: 100, forecast_cloud_cover_pct: 30, forecast_temperature_c: 15, forecast_ghi_mean_7d_w_m2: 400}
+        - {slot_start: "2026-11-17 03:30:00+00", forecast_ghi_w_m2: 630, forecast_direct_w_m2: 100, forecast_cloud_cover_pct: 30, forecast_temperature_c: 15, forecast_ghi_mean_7d_w_m2: null}
+
