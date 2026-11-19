@@ -38,6 +38,15 @@ def run_code() -> dict[str, str]:
     return {**git_state(), "image_digest": os.environ.get("JTF_IMAGE_DIGEST", "")}
 
 
+def group_metrics(groups: pd.DataFrame) -> dict[str, float]:
+    """A backtest's metrics per kind of day, named `<grouping>/<group>/<metric>`."""
+    long = groups.melt(
+        id_vars=["grouping", "group"], value_vars=["mae_share", "bias_share", "mae_mw"]
+    )
+    names = long["grouping"] + "/" + long["group"] + "/" + long["variable"]
+    return dict(zip(names, long["value"].astype(float), strict=True))
+
+
 def log_backtest(
     *,
     run_id: str,
@@ -46,10 +55,12 @@ def log_backtest(
     last_month: date,
     per_fold: pd.DataFrame,
     overall: dict[str, float],
+    groups: pd.DataFrame,
     fidelity: dict[str, int],
 ) -> str:
     """One MLflow run per model per backtest: the overall metrics, each metric per fold as a step
-    (MLflow draws them over the folds), and the table of folds. Returns MLflow's run ID."""
+    (MLflow draws them over the folds), each per kind of day (`sky/clear/mae_share`), and the
+    tables of folds and of groups. Returns MLflow's run ID."""
     import mlflow
     from mlflow.entities import Metric
 
@@ -82,6 +93,7 @@ def log_backtest(
             }
         )
         mlflow.log_metrics(overall)
+        mlflow.log_metrics(group_metrics(groups))
         now = int(time.time() * 1000)
         client.log_batch(
             run.info.run_id,
@@ -92,4 +104,5 @@ def log_backtest(
             ],
         )
         mlflow.log_text(per_fold.to_csv(index=False), "folds.csv")
+        mlflow.log_text(groups.to_csv(index=False), "groups.csv")
     return run.info.run_id

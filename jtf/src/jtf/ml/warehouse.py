@@ -169,7 +169,8 @@ class BacktestWarehouse:
         """One run's rows of ads_ml_outcome_solar, sorted, so its metrics add up the same each
         time."""
         sql = f"""
-            select fold, decision_time, slot_start, error_mw, error_share, is_daylight
+            select fold, decision_time, target_day, slot_start, error_mw, error_share,
+                is_daylight, sky, is_curtailed_day, season
             from `{self.table("ads", "ads_ml_outcome_solar")}`
             where run_id = @run_id
             order by fold, decision_time, slot_start

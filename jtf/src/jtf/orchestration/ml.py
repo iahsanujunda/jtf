@@ -5,7 +5,8 @@
    target days, or a reproduce of an earlier run. Keyed as dbt's source for the predictions, so
    it is one node in the lineage
 2. `ads/ads_ml_outcome_solar`: a dbt model, each prediction met by its label
-3. `ml/solar_backtest_metrics`: a backtest's outcome aggregated per fold, logged to MLflow
+3. `ml/solar_backtest_metrics`: a backtest's outcome aggregated per fold and per kind of day,
+   logged to MLflow
 
 So the lineage runs from raw files through DWS to the metrics. Folds, the models, runs and the
 metrics are functions in jtf.ml; these assets only wire them to BigQuery and MLflow.
@@ -19,6 +20,7 @@ import pandas as pd
 from jtf.ml.backtest import (
     FIRST_TEST_MONTH,
     PERSISTENCE,
+    by_group,
     fold_months,
     last_complete_month,
     metrics,
@@ -130,7 +132,9 @@ def solar_backtest_metrics(
     first_month = date.fromisoformat(run["first_target_day"]).replace(day=1)
     last_month = date.fromisoformat(run["last_target_day"]).replace(day=1)
     folds = fold_months(first_month, last_month)
-    per_fold, overall = metrics(datasets.backtest().outcomes(run["run_id"]))
+    outcomes = datasets.backtest().outcomes(run["run_id"])
+    per_fold, overall = metrics(outcomes)
+    groups = by_group(outcomes)
     if len(per_fold) != len(folds):
         raise dg.Failure(f"{len(per_fold)} folds scored, {len(folds)} predicted")
     mlflow_run_id = log_backtest(
@@ -140,11 +144,16 @@ def solar_backtest_metrics(
         last_month=last_month,
         per_fold=per_fold,
         overall=overall,
+        groups=groups,
         fidelity={"exact": run["exact"], "approximate": run["approximate"]},
     )
     context.log.info(f"{run['model']}: {overall}")
+    sky = groups[groups["grouping"] == "sky"]
+    by_sky = {
+        f"mae_share_{g}": float(v) for g, v in zip(sky["group"], sky["mae_share"], strict=True)
+    }
     return dg.MaterializeResult(
-        metadata={"run_id": run["run_id"], "mlflow_run_id": mlflow_run_id, **overall}
+        metadata={"run_id": run["run_id"], "mlflow_run_id": mlflow_run_id, **overall, **by_sky}
     )
 
 
