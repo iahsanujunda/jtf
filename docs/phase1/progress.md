@@ -101,6 +101,7 @@ Each is recorded where it applies; the list says where.
 | Step 6's design: "identical" checked by fingerprint; reproduce on the same git commit until images exist; five e2e tests; a backtest is a what-if replay plus metrics; replays write to dev ADS under their run ID and mode; the test world is real raw files for target days 15 to 19 November 2026, cut by a script, loaded through the parsers in CI | [e2e README](../../e2e_tests/README.md) |
 | The solar label is delivered + curtailed, delivered beside it; curtailed days are a segment in the metrics; no flag column, F6 as two data tests on the label; `solar_d2_mw` stays on delivered output and the seven-day ratio reads the sum (agreed 2026-11-19) | [notebook 08](../../notebooks/08_solar_label.ipynb); phase-1 README, Decisions |
 | A notebook keeps its steps in the order they were taken, an attempt that misled included and run, from notebook 08 on (agreed 2026-11-19) | [workflow](../workflow.md); AGENTS.md |
+| A pull request's title and description name things by what they are, never by our labels for them (a fault's number, a step's number), with enough in the description to follow it without opening another document (agreed 2026-11-19) | [workflow](../workflow.md), Release; AGENTS.md |
 | `main` takes every change through a pull request, docs included: the ruleset `main protection` (no approval required, no force push, no deletion), active since 2026-11-18 09:02. No CI check is required yet | GitHub, the repository's rulesets |
 
 ## Known issues
