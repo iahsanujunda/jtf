@@ -37,6 +37,10 @@ models:
     columns:
       - name: solar_d2_mw
         description: Solar output in the same slot on D−2, as known at T; null if nothing was.
+      - name: solar_mean_7d_mw
+        description: >
+          The mean of the same slot's solar output over D−8 to D−2, delivered and curtailed added,
+          each as known at T; null unless all seven days are known. The second baseline.
       - name: capacity_mw
         description: Installed solar on D as estimated at T (dws_capacity).
         data_tests: [not_null]
@@ -156,8 +160,8 @@ models:
 
   - name: dws_fidelity
     description: >
-      How exact each decision time's inputs are: per decision time and input (actuals_d2, weather,
-      capacity), the versions T read and how many are approximate. Fidelity comes from what T read,
+      How exact each decision time's inputs are: per decision time and input (actuals_d2, actuals_7d,
+      weather, capacity), the versions T read and how many are approximate. Fidelity comes from what T read,
       not from a date (notebooks/06_warehouse_against_sources.ipynb, section 3; PRD, Fidelity).
     columns:
       - name: decision_time
@@ -168,7 +172,7 @@ models:
         data_tests:
           - accepted_values:
               arguments:
-                values: [actuals_d2, weather, capacity]
+                values: [actuals_d2, actuals_7d, weather, capacity]
       - name: versions_read
         description: The versions or values the input read at T.
       - name: approximate_versions
@@ -223,6 +227,60 @@ unit_tests:
         - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:00:00+00", solar_d2_mw: 5000}
         - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:30:00+00", solar_d2_mw: 6500}
         - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 04:00:00+00", solar_d2_mw: null}
+
+  - name: the_seven_day_mean_is_the_same_slot_over_d8_to_d2_as_known_at_t
+    description: >
+      Slot 12:00: the seven days 9 to 15 November give 7,000, 6,000, 5,000, 4,000, 3,000, 2,000 and
+      900 delivered with 100 curtailed, a mean of 4,000. Left out: the day before the window (8
+      November), a correction of the 14th known one minute after T, and wind. Slot 12:30: the 15th
+      became known only after T, so six days are known and there is no mean.
+    model: dws_solar_features
+    given:
+      - input: ref('dws_decision_slots')
+        rows:
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:00:00+00"}
+          - {decision_time: "2026-11-16 00:00:00+00", target_day: "2026-11-17", slot_start: "2026-11-17 03:30:00+00"}
+      - input: ref('dwd_tepco_actuals')
+        format: sql
+        rows: |
+          with days as (
+            select day, [70000, 7000, 6000, 5000, 4000, 3000, 2000, 900][offset(day - 8)] as mw
+            from unnest(generate_array(8, 15)) as day
+          ),
+          slots as (
+            select timestamp(datetime(2026, 11, day, 3, minute, 0)) as slot_start, day, mw
+            from days cross join unnest([0, 30]) as minute
+          )
+          -- delivered output: every day at 12:00, all but the 15th at 12:30
+          select slot_start, 'solar' as measure, cast(mw as float64) as value_mw,
+            timestamp_add(slot_start, interval 2 hour) as known_at,
+            if(day = 14, timestamp '2026-11-16 00:01:00+00', null) as known_until
+          from slots where not (day = 15 and extract(minute from slot_start) = 30)
+          union all  -- the 15th at 12:30, known only after T
+          select timestamp '2026-11-15 03:30:00+00', 'solar', 900.0,
+            timestamp '2026-11-16 00:30:00+00', cast(null as timestamp)
+          union all  -- curtailed output: 100 MW on the 15th, none before
+          select slot_start, 'solar_curtailed', if(day = 15, 100.0, 0.0),
+            timestamp_add(slot_start, interval 2 hour), cast(null as timestamp)
+          from slots
+          union all  -- a correction of the 14th, known one minute after T
+          select slot_start, 'solar', 99999.0, timestamp '2026-11-16 00:01:00+00',
+            cast(null as timestamp)
+          from slots where day = 14
+          union all  -- wind is not solar
+          select slot_start, 'wind', 500.0, timestamp_add(slot_start, interval 2 hour),
+            cast(null as timestamp)
+          from slots
+      - input: ref('dws_capacity')
+        rows: []
+      - input: ref('dws_point_weights')
+        rows: []
+      - input: ref('dim_sun_slots')
+        rows: []
+    expect:
+      rows:
+        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:00:00+00", solar_mean_7d_mw: 4000}
+        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:30:00+00", solar_mean_7d_mw: null}
 
   # dws_capacity. Times are UTC; T is 09:00 JST on D−1. The releases meant to be used lie on the
   # line 20,000 MW at D = 2026-11-17 plus 2 MW a day, so the fit is exact; all others lie far off.
@@ -514,7 +572,9 @@ unit_tests:
       a D−2 slot known one minute after T and a wind value are not read. The weather comes from
       Previous Runs. One of the two releases read has files changed after its known_at. At T on
       the 17th: D−2's slots are captured, the weather is the live capture, and the rule-dated
-      release's files are unchanged since its known_at, so it counts as exact.
+      release's files are unchanged since its known_at, so it counts as exact. The seven days back
+      read curtailed output too, and at T on the 17th still hold the rule-dated slot of the 15th:
+      actuals_7d stays approximate where actuals_d2 is already exact.
     model: dws_fidelity
     given:
       - input: ref('dws_decision_slots')
@@ -523,6 +583,7 @@ unit_tests:
           - {decision_time: "2026-11-17 00:00:00+00", target_day: "2026-11-18", slot_start: "2026-11-18 03:00:00+00"}
       - input: ref('dwd_tepco_actuals')
         rows:
+          - {slot_start: "2026-11-13 03:00:00+00", measure: solar_curtailed, basis: captured, known_at: "2026-11-13 05:00:00+00", known_until: null}
           - {slot_start: "2026-11-14 15:00:00+00", measure: solar, basis: rule, known_at: "2026-11-14 16:30:00+00", known_until: null}
           - {slot_start: "2026-11-15 03:00:00+00", measure: solar, basis: captured, known_at: "2026-11-15 05:00:00+00", known_until: null}
           - {slot_start: "2026-11-15 03:30:00+00", measure: solar, basis: captured, known_at: "2026-11-16 00:01:00+00", known_until: null}
@@ -544,8 +605,10 @@ unit_tests:
     expect:
       rows:
         - {decision_time: "2026-11-16 00:00:00+00", input: actuals_d2, versions_read: 2, approximate_versions: 1, fidelity: approximate}
+        - {decision_time: "2026-11-16 00:00:00+00", input: actuals_7d, versions_read: 3, approximate_versions: 1, fidelity: approximate}
         - {decision_time: "2026-11-16 00:00:00+00", input: weather, versions_read: 2, approximate_versions: 2, fidelity: approximate}
         - {decision_time: "2026-11-16 00:00:00+00", input: capacity, versions_read: 2, approximate_versions: 1, fidelity: approximate}
         - {decision_time: "2026-11-17 00:00:00+00", input: actuals_d2, versions_read: 1, approximate_versions: 0, fidelity: exact}
+        - {decision_time: "2026-11-17 00:00:00+00", input: actuals_7d, versions_read: 5, approximate_versions: 1, fidelity: approximate}
         - {decision_time: "2026-11-17 00:00:00+00", input: weather, versions_read: 1, approximate_versions: 0, fidelity: exact}
         - {decision_time: "2026-11-17 00:00:00+00", input: capacity, versions_read: 1, approximate_versions: 0, fidelity: exact}
