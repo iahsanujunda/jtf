@@ -154,7 +154,9 @@ def update(
     echo: Callable[[str], None] = print,
 ) -> str:
     """Pull `main` into Dagster's checkout and reload, with no run in between. Returns what
-    changed; raises Refused if nothing was pulled, RuntimeError if the new code failed to load."""
+    changed; raises Refused if nothing was pulled, RuntimeError if the new code failed to load.
+    With nothing to pull it still reloads: the checkout may have moved without one (a pull by
+    hand), and Dagster can't say which commit it loaded."""
     if not git.runs_dagster():
         raise Refused(f"{git.repo} has no .dagster/: it is not the checkout Dagster runs from")
     if git.branch() != "main":
@@ -162,9 +164,7 @@ def update(
     if git.dirty():
         raise Refused(f"{git.repo} has uncommitted changes")
     old, new = git.fetch()
-    if old == new:
-        return "already up to date"
-    changed = git.changed(old, new)
+    changed = git.changed(old, new) if old != new else set()
     if changed & DEPENDENCIES:
         raise Refused(
             f"dependencies changed ({', '.join(sorted(changed & DEPENDENCIES))}): stop "
@@ -185,7 +185,8 @@ def update(
                 break
             if waited >= timeout:
                 raise Refused(f"{len(runs)} runs still active after {timeout:.0f} s")
-        git.fast_forward(new)
+        if old != new:
+            git.fast_forward(new)
     except BaseException:
         for sensor in sensors:
             dagster.start(sensor)
@@ -199,6 +200,8 @@ def update(
         ) from e
     for sensor in sensors:
         dagster.start(sensor)
+    if old == new:
+        return "already up to date; reloaded, in case the checkout moved without a reload"
     models = sorted(f for f in changed if f.startswith("warehouse/dbt/models/"))
     note = f"; models changed, check in the data that they were rebuilt: {models}" if models else ""
     return f"{old[:7]} -> {new[:7]}, {len(changed)} files, reloaded{note}"
