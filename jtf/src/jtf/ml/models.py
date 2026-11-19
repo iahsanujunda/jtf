@@ -83,6 +83,7 @@ def train_miss_by_hour(rows: pd.DataFrame) -> MissByHour:
 # half hour and the day of the year are read off the slot itself
 BOOSTED_INPUTS = {
     "mean_7d_share": ("solar_mean_7d_mw", "capacity_mw"),
+    "d2_share": ("solar_d2_mw", "capacity_mw"),
     "clear_sky_share": ("clear_sky_mw", "capacity_mw"),
     "forecast_ghi_w_m2": ("forecast_ghi_w_m2",),
     "forecast_direct_w_m2": ("forecast_direct_w_m2",),
@@ -93,6 +94,9 @@ BOOSTED_INPUTS = {
     "half_hour": (),
     "day_of_year": (),
 }
+# What it is given: every input but two. The day of the year made it worse in 13 of 16 test
+# months, and the same slot two days back added a hundredth of a point (notebook 11, section 4)
+KEPT_INPUTS = tuple(name for name in BOOSTED_INPUTS if name not in ("d2_share", "day_of_year"))
 ALPHAS = dict(zip(QUANTILES, (0.1, 0.5, 0.9), strict=True))
 # LightGBM's defaults for everything that shapes the trees (plan, Model and evaluation: no search
 # in phase 1). The rest makes a training repeat: one thread, a fixed seed, and the two settings
@@ -122,6 +126,7 @@ def boosted_inputs(features: pd.DataFrame, inputs: tuple[str, ...]) -> pd.DataFr
     local = features["slot_start"].dt.tz_convert("Asia/Tokyo")
     made = {
         "mean_7d_share": lambda: features["solar_mean_7d_mw"] / features["capacity_mw"],
+        "d2_share": lambda: features["solar_d2_mw"] / features["capacity_mw"],
         "clear_sky_share": lambda: features["clear_sky_mw"] / features["capacity_mw"],
         "half_hour": lambda: local.dt.hour * 2 + local.dt.minute // 30,
         "day_of_year": lambda: local.dt.day_of_year,
@@ -153,7 +158,7 @@ class Boosted:
         return "\n".join(f"# {name}\n{booster.model_to_string()}" for name, booster in named)
 
 
-def train_boosted(rows: pd.DataFrame, inputs: tuple[str, ...] = tuple(BOOSTED_INPUTS)) -> Boosted:
+def train_boosted(rows: pd.DataFrame, inputs: tuple[str, ...] = KEPT_INPUTS) -> Boosted:
     """Fit Boosted on the daylight slots that have a label. An input may be missing in a row:
     LightGBM sends a missing value down the side of each split that fitted the training rows
     better."""

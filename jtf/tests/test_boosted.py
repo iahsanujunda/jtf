@@ -10,7 +10,14 @@ import pandas as pd
 import pytest
 
 from jtf.ml.backtest import QUANTILES
-from jtf.ml.models import BOOSTED_INPUTS, Boosted, boosted_inputs, columns_of, train_boosted
+from jtf.ml.models import (
+    BOOSTED_INPUTS,
+    KEPT_INPUTS,
+    Boosted,
+    boosted_inputs,
+    columns_of,
+    train_boosted,
+)
 from jtf.ml.replay import train_by_month
 
 CAPACITY = 20_000.0
@@ -18,7 +25,7 @@ CAPACITY = 20_000.0
 # on another machine: while this holds there, a run can be reproduced on either. LightGBM's
 # documentation promises it for the same version and binary only, so an upgrade may change it:
 # then say so in the pull request, since earlier runs of the model stop being reproducible
-RECORDED = "56353f6bcc661dc640846b8ac4f2723f9ac85e7e2dfc169a116bc2e728efc9eb"
+RECORDED = "cc177ec5e9ad319a4bb9c497e17d85d00e65b651aa3e4e25be5f9bb4b3386a16"
 
 
 def world(days: int = 120) -> pd.DataFrame:
@@ -42,6 +49,7 @@ def world(days: int = 120) -> pd.DataFrame:
             "capacity_mw": CAPACITY,
             "clear_sky_mw": clear * CAPACITY,
             "solar_mean_7d_mw": clear * CAPACITY * 3 / 5,
+            "solar_d2_mw": clear * CAPACITY * ((day * 37 + 37) % 100) / 100,
             "forecast_ghi_w_m2": clear * through * 1000,
             "forecast_direct_w_m2": clear * through * 700,
             "forecast_diffuse_w_m2": clear * through * 300,
@@ -76,6 +84,15 @@ def test_an_inputs_columns_are_named_once_with_the_capacity_that_gives_mw():
     }
 
 
+def test_the_model_keeps_every_input_but_the_day_of_the_year_and_two_days_back(rows):
+    left_out = set(BOOSTED_INPUTS) - set(KEPT_INPUTS)
+    past = rows[rows["target_day"] < date(2025, 2, 1)]
+
+    assert left_out == {"day_of_year", "d2_share"} and len(KEPT_INPUTS) == 9
+    assert train_boosted(past).inputs == KEPT_INPUTS
+    assert "solar_d2_mw" not in columns_of(KEPT_INPUTS)  # one less day of actuals to depend on
+
+
 def test_power_is_given_as_a_share_of_capacity_and_the_calendar_in_jst():
     slots = pd.DataFrame(
         {
@@ -83,15 +100,23 @@ def test_power_is_given_as_a_share_of_capacity_and_the_calendar_in_jst():
             "slot_start": pd.to_datetime(["2025-03-01 03:30", "2025-12-31 15:30"], utc=True),
             "capacity_mw": [20_000.0, 25_000.0],
             "solar_mean_7d_mw": [5_000.0, 0.0],
+            "solar_d2_mw": [10_000.0, 0.0],
             "clear_sky_mw": [12_000.0, 0.0],
             "forecast_ghi_w_m2": [640.0, None],
         }
     )
-    names = ("mean_7d_share", "clear_sky_share", "forecast_ghi_w_m2", "half_hour", "day_of_year")
+    names = (
+        "mean_7d_share",
+        "d2_share",
+        "clear_sky_share",
+        "forecast_ghi_w_m2",
+        "half_hour",
+        "day_of_year",
+    )
     given = boosted_inputs(slots, names)
 
     assert list(given.columns) == list(names)
-    assert given.iloc[0].to_list() == [0.25, 0.6, 640.0, 25.0, 60.0]
+    assert given.iloc[0].to_list() == [0.25, 0.5, 0.6, 640.0, 25.0, 60.0]
     assert given.iloc[1][["half_hour", "day_of_year"]].to_list() == [1.0, 1.0]
     assert np.isnan(given.iloc[1]["forecast_ghi_w_m2"])
 
@@ -126,7 +151,7 @@ def test_it_gives_mw_that_follow_the_forecast_more_closely_than_the_seven_day_me
 
 def test_what_it_learned_is_a_share_so_twice_the_capacity_gives_twice_the_mw(rows, learned):
     april = rows[rows["target_day"] >= date(2025, 4, 1)]
-    scaled = ["capacity_mw", "solar_mean_7d_mw", "clear_sky_mw"]
+    scaled = ["capacity_mw", "solar_mean_7d_mw", "solar_d2_mw", "clear_sky_mw"]
     doubled = april.assign(**{name: april[name] * 2 for name in scaled})
 
     said, twice = learned.predict(april), learned.predict(doubled)
@@ -138,7 +163,7 @@ def test_what_it_learned_is_a_share_so_twice_the_capacity_gives_twice_the_mw(row
 def test_a_fleet_that_doubled_halfway_teaches_the_same_as_one_that_never_grew(rows):
     past = rows[rows["target_day"] < date(2025, 2, 1)]
     later = past["target_day"] >= date(2025, 1, 16)
-    scaled = ["capacity_mw", "solar_mean_7d_mw", "clear_sky_mw", "label_mw"]
+    scaled = ["capacity_mw", "solar_mean_7d_mw", "solar_d2_mw", "clear_sky_mw", "label_mw"]
     grown = past.assign(**{name: past[name].where(~later, past[name] * 2) for name in scaled})
 
     assert grown["label_mw"].max() > past["label_mw"].max() * 1.5
