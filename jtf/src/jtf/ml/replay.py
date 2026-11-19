@@ -30,8 +30,15 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
-from jtf.ml.backtest import MEAN_7D, MEAN_7D_RANGE, PERSISTENCE, PREDICTION_COLUMNS, QUANTILES
-from jtf.ml.models import train_miss_by_hour
+from jtf.ml.backtest import (
+    MEAN_7D,
+    MEAN_7D_RANGE,
+    MEAN_7D_SCALED,
+    PERSISTENCE,
+    PREDICTION_COLUMNS,
+    QUANTILES,
+)
+from jtf.ml.models import scaled_mean, train_miss_by_hour
 
 MODES = ("backtest", "what-if", "reproduce")
 RUN_COLUMNS = [
@@ -92,6 +99,20 @@ MODELS = {
     # times a recent ratio gives the same forecast (notebook 09, section 5)
     MEAN_7D: Model(
         MEAN_7D, "1", ("solar_mean_7d_mw",), ("actuals_7d",), lambda f: f["solar_mean_7d_mw"]
+    ),
+    # The seven-day mean scaled by the forecast's change against that week: the one to beat
+    MEAN_7D_SCALED: Model(
+        MEAN_7D_SCALED,
+        "1",
+        (
+            "solar_mean_7d_mw",
+            "forecast_ghi_w_m2",
+            "forecast_ghi_mean_7d_w_m2",
+            "clear_sky_mw",
+            "capacity_mw",
+        ),
+        ("actuals_7d", "weather", "capacity"),
+        scaled_mean,
     ),
     # The seven-day mean with a range learned from its past misses: the simplest trained model
     MEAN_7D_RANGE: Model(

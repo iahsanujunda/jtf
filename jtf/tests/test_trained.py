@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from jtf.ml.backtest import MEAN_7D, MEAN_7D_RANGE, QUANTILES
-from jtf.ml.models import half_hour, train_miss_by_hour
+from jtf.ml.models import half_hour, scaled_mean, train_miss_by_hour
 from jtf.ml.replay import MODELS, Mismatch, Model, Refused, reproduce, run, training_cutoff
 from jtf.ml.warehouse import KEY_COLUMNS, OUTPUT_COLUMNS
 
@@ -230,3 +230,20 @@ def test_the_range_is_the_mean_plus_the_learned_miss_and_never_below_zero():
     assert said.iloc[0].tolist() == pytest.approx([0.0, 300.0, 1740.0])
     assert said.iloc[1].tolist() == [0.0, 0.0, 0.0]
     assert learned.dump() == train_miss_by_hour(rows).dump()
+
+
+def test_the_scaled_mean_follows_the_forecast_only_where_a_ratio_means_something():
+    features = pd.DataFrame(
+        {
+            # a lit slot forecast brighter than its week; a lit slot forecast duller; a slot that
+            # isn't lit; a week too dim to divide by; a week with no forecast; no forecast at all
+            "solar_mean_7d_mw": [5000.0, 5000.0, 300.0, 5000.0, 5000.0, 5000.0],
+            "forecast_ghi_w_m2": [600.0, 200.0, 60.0, 30.0, 600.0, None],
+            "forecast_ghi_mean_7d_w_m2": [400.0, 400.0, 30.0, 10.0, None, 400.0],
+            "clear_sky_mw": [8000.0, 8000.0, 400.0, 8000.0, 8000.0, 8000.0],
+            "capacity_mw": 10000.0,
+        }
+    )
+    assert scaled_mean(features).tolist() == [7500.0, 2500.0, 300.0, 5000.0, 5000.0, 5000.0]
+    assert MODELS["mean_7d_scaled"].inputs == ("actuals_7d", "weather", "capacity")
+    assert set(features.columns) == set(MODELS["mean_7d_scaled"].features)
