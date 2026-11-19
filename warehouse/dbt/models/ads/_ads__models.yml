@@ -19,11 +19,45 @@ models:
           arguments:
             expression: label_mw >= delivered_mw and curtailed_mw >= 0
 
+  - name: ads_ml_day_solar
+    description: >
+      A day and the groups results are read by: how clear it was against a clear day at its time
+      of year, whether it was curtailed, its season. Known only afterwards, from the labels and
+      from later days: for reading results, never an input.
+    columns:
+      - name: day
+        description: The day in JST. A day has a row once all 48 of its slots have a label.
+        data_tests: [unique, not_null]
+      - name: day_ratio
+        description: The day's label over its clear-sky output, across its lit slots.
+        data_tests: [not_null]
+      - name: clear_ratio
+        description: >
+          What a clear day gives at that time of year: the 90th percentile of day_ratio over the
+          29 days around the day. Null until all 14 later days are whole.
+      - name: clearness
+        description: day_ratio over clear_ratio. Null until all 14 later days are whole.
+      - name: sky
+        description: clear from a clearness of 0.9, cloudy under 0.5, mixed between; null until set.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [clear, mixed, cloudy]
+      - name: is_curtailed
+        description: Some slot of the day was curtailed.
+        data_tests: [not_null]
+      - name: season
+        description: winter is December to February, then spring, summer and autumn by three months.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [winter, spring, summer, autumn]
+
   - name: ads_ml_outcome_solar
     description: >
       Each prediction met by its label: one row per prediction, with its error in MW and as a
-      share of the capacity estimated at its decision time, and whether its slot is daylight.
-      Backtest metrics aggregate it.
+      share of the capacity estimated at its decision time, whether its slot is daylight, and the
+      groups its target day falls in (ads_ml_day_solar). Backtest metrics aggregate it.
     columns:
       - name: error_mw
         description: Predicted minus label, MW. Positive means the forecast was too high.
@@ -32,6 +66,12 @@ models:
       - name: is_daylight
         description: Not night by dim_daylight. Metrics count daylight slots only.
         data_tests: [not_null]
+      - name: sky
+        description: The target day's sky (clear, mixed, cloudy); null until that day is grouped.
+      - name: is_curtailed_day
+        description: Some slot of the target day was curtailed.
+      - name: season
+        description: The target day's season.
     data_tests:
       - unique_combination:
           arguments:
@@ -63,7 +103,8 @@ unit_tests:
     description: >
       T is 09:00 JST on 2026-11-13. Slot 12:00 on D: 6,000 predicted against a label of 5,500,
       an error of +500 MW, 0.025 of 20,000 MW. Slot 00:00 on D is night. Slot 12:30 has no actual
-      yet: its row stays, with no label and no error.
+      yet: its row stays, with no label and no error. D was a clear, curtailed autumn day, and
+      every one of its rows says so. The slot of the next day has no group yet.
     model: ads_ml_outcome_solar
     given:
       - input: source('ads', 'ads_ml_prediction_solar')
@@ -71,6 +112,7 @@ unit_tests:
           - {run_id: r1, model: persistence_d2, mode: backtest, fold: "2026-11-01", decision_time: "2026-11-13 00:00:00+00", target_day: "2026-11-14", slot_start: "2026-11-14 03:00:00+00", predicted_mw: 6000}
           - {run_id: r1, model: persistence_d2, mode: backtest, fold: "2026-11-01", decision_time: "2026-11-13 00:00:00+00", target_day: "2026-11-14", slot_start: "2026-11-13 15:00:00+00", predicted_mw: 0}
           - {run_id: r1, model: persistence_d2, mode: backtest, fold: "2026-11-01", decision_time: "2026-11-13 00:00:00+00", target_day: "2026-11-14", slot_start: "2026-11-14 03:30:00+00", predicted_mw: 6100}
+          - {run_id: r1, model: persistence_d2, mode: backtest, fold: "2026-11-01", decision_time: "2026-11-14 00:00:00+00", target_day: "2026-11-15", slot_start: "2026-11-15 03:00:00+00", predicted_mw: 6200}
       - input: ref('ads_ml_label_solar')
         rows:
           - {slot_start: "2026-11-14 03:00:00+00", label_mw: 5500}
@@ -83,8 +125,68 @@ unit_tests:
           - {slot_start: "2026-11-14 03:00:00+00", is_night: false}
           - {slot_start: "2026-11-13 15:00:00+00", is_night: true}
           - {slot_start: "2026-11-14 03:30:00+00", is_night: false}
+          - {slot_start: "2026-11-15 03:00:00+00", is_night: false}
+      - input: ref('ads_ml_day_solar')
+        rows:
+          - {day: "2026-11-14", sky: clear, is_curtailed: true, season: autumn}
     expect:
       rows:
-        - {slot_start: "2026-11-14 03:00:00+00", label_mw: 5500, error_mw: 500, error_share: 0.025, is_daylight: true}
-        - {slot_start: "2026-11-13 15:00:00+00", label_mw: 0, error_mw: 0, error_share: 0, is_daylight: false}
-        - {slot_start: "2026-11-14 03:30:00+00", label_mw: null, error_mw: null, error_share: null, is_daylight: true}
+        - {slot_start: "2026-11-14 03:00:00+00", label_mw: 5500, error_mw: 500, error_share: 0.025, is_daylight: true, sky: clear, is_curtailed_day: true, season: autumn}
+        - {slot_start: "2026-11-13 15:00:00+00", label_mw: 0, error_mw: 0, error_share: 0, is_daylight: false, sky: clear, is_curtailed_day: true, season: autumn}
+        - {slot_start: "2026-11-14 03:30:00+00", label_mw: null, error_mw: null, error_share: null, is_daylight: true, sky: clear, is_curtailed_day: true, season: autumn}
+        - {slot_start: "2026-11-15 03:00:00+00", label_mw: null, error_mw: null, error_share: null, is_daylight: true, sky: null, is_curtailed_day: null, season: null}
+
+  # ads_ml_day_solar. 31 whole days of January 2026 and one partial, 48 slots each, capacity
+  # 10,000 MW. Slots 20 to 27 are lit (clear sky 1,000 MW); slot 10 has 100 MW of clear sky, too
+  # dim to count, and a label of 999 MW that must not either.
+  - name: a_days_sky_is_its_ratio_over_a_clear_days_and_is_set_once_14_later_days_are_whole
+    description: >
+      Most days give 0.8 of clear sky, every fourth day 1.0, so the 90th percentile of any 29 days
+      is 1.0 and their median 0.8. The 13th to the 17th give 0.5, 0.9, 0.4, 1.0 and 0.6: mixed,
+      clear, cloudy, clear and mixed, with the boundaries at 0.9 and 0.5 on the clear and the mixed
+      side. The 16th has one curtailed slot. The 17th is the last with 14 whole days after it; from
+      the 18th on a day has its ratio and no group yet. 1 February has only 17 slots: no row.
+    model: ads_ml_day_solar
+    given:
+      - input: ref('dws_solar_features')
+        format: sql
+        rows: |
+          select date_add(date '2026-01-01', interval day - 1 day) as target_day,
+            timestamp_add(timestamp '2026-01-01 00:00:00+00', interval (day - 1) * 1440 + slot * 30 minute) as slot_start,
+            10000.0 as capacity_mw,
+            case when slot between 20 and 27 then 1000.0 when slot = 10 then 100.0 else 0.0 end as clear_sky_mw
+          from unnest(generate_array(1, 32)) as day cross join unnest(generate_array(0, 47)) as slot
+      - input: ref('ads_ml_label_solar')
+        format: sql
+        rows: |
+          select
+            timestamp_add(timestamp '2026-01-01 00:00:00+00', interval (day - 1) * 1440 + slot * 30 minute) as slot_start,
+            case
+              when slot = 10 then 999.0
+              when slot between 20 and 27 then 1000.0 * case day
+                when 13 then 0.5 when 14 then 0.9 when 15 then 0.4 when 17 then 0.6
+                else if(mod(day, 4) = 0, 1.0, 0.8) end
+              else 0.0
+            end as label_mw,
+            if(day = 16 and slot = 22, 50.0, 0.0) as curtailed_mw
+          from unnest(generate_array(1, 32)) as day cross join unnest(generate_array(0, 47)) as slot
+          where not (day = 32 and slot > 16)
+    expect:
+      format: sql
+      rows: |
+        with days as (
+          select day, case day
+            when 13 then 0.5 when 14 then 0.9 when 15 then 0.4 when 17 then 0.6
+            else if(mod(day, 4) = 0, 1.0, 0.8) end as ratio
+          from unnest(generate_array(1, 31)) as day
+        )
+        select date_add(date '2026-01-01', interval day - 1 day) as day,
+          ratio as day_ratio,
+          if(day <= 17, 1.0, null) as clear_ratio,
+          if(day <= 17, ratio, null) as clearness,
+          case when day > 17 then null when ratio >= 0.9 then 'clear' when ratio < 0.5 then 'cloudy'
+            else 'mixed' end as sky,
+          day = 16 as is_curtailed,
+          'winter' as season
+        from days
+

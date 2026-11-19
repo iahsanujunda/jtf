@@ -76,3 +76,31 @@ def metrics(outcomes: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
     per_fold = scored.groupby("fold").agg(**AGGREGATES).reset_index()
     overall = scored.groupby(lambda _: "overall").agg(**AGGREGATES).iloc[0]
     return per_fold, {name: float(value) for name, value in overall.items()}
+
+
+NOT_YET = "not yet grouped"
+CURTAILED = {True: "curtailed", False: "normal"}
+
+
+def by_group(outcomes: pd.DataFrame) -> pd.DataFrame:
+    """The same metrics per kind of day (plan, Segments): by the target day's sky (clear, mixed,
+    cloudy), by whether it was curtailed, and by season, as ads_ml_outcome_solar has them. One row
+    per grouping and group, with its days. A day whose sky isn't set yet, its 14 later days not
+    being whole, counts under `NOT_YET`: every grouping covers every scored slot once."""
+    scored = outcomes[outcomes["is_daylight"].eq(True) & outcomes["error_mw"].notna()]
+    scored = scored.assign(
+        abs_share=scored["error_share"].abs(),
+        abs_mw=scored["error_mw"].abs(),
+        curtailed=scored["is_curtailed_day"].map(CURTAILED),
+    )
+    long = scored.melt(
+        id_vars=["target_day", "error_mw", "error_share", "abs_share", "abs_mw"],
+        value_vars=["sky", "curtailed", "season"],
+        var_name="grouping",
+        value_name="group",
+    ).fillna({"group": NOT_YET})
+    return (
+        long.groupby(["grouping", "group"])
+        .agg(days=("target_day", "nunique"), **AGGREGATES)
+        .reset_index()
+    )
