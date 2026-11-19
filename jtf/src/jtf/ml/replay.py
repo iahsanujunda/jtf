@@ -234,20 +234,31 @@ def run(
 def _train_and_predict(
     warehouse: RunWarehouse, spec: Model, features: pd.DataFrame
 ) -> tuple[pd.DataFrame, list[dict], date]:
-    """One training per month of target days, each on what was known when the month began, and
-    that month's predictions from it. The three forecasts of a slot are sorted, so that a low
-    never lies above a high. Returns the predictions on `features`' index, what each training
-    was (its month, its last day, its size, its file and the file's hash, its summary), and the
-    last day any of them learned from."""
-    months = sorted(set(features["fold"]))
-    learned_until = training_cutoff(months[-1])
+    """The model trained month by month on what the warehouse knew, and its predictions. Returns
+    them with what each training was and the last day any of them learned from."""
+    learned_until = training_cutoff(max(features["fold"]))
     known = warehouse.training(learned_until, spec.features)
+    try:
+        said, trainings = train_by_month(spec.train, known, features)
+    except Refused as e:
+        raise Refused(f"{spec.name}: {e}") from e
+    return said, trainings, learned_until
+
+
+def train_by_month(
+    train: Callable[[pd.DataFrame], Trained], known: pd.DataFrame, features: pd.DataFrame
+) -> tuple[pd.DataFrame, list[dict]]:
+    """One training per month of target days in `features`, each on the rows of `known` up to
+    that month's cutoff, and that month's predictions from it. The three forecasts of a slot are
+    sorted, so that a low never lies above a high. Returns the predictions on `features`' index,
+    and what each training was: its month, its last day, its size, its file and the file's hash,
+    its summary."""
     parts, trainings = [], []
-    for month in months:  # a model each: a handful of months, not a row at a time
+    for month in sorted(set(features["fold"])):  # a model each: a handful of months, not rows
         past = known[known["target_day"] <= training_cutoff(month)]
         if past.empty:
-            raise Refused(f"nothing to train {spec.name} on before {month}")
-        learned = spec.train(past)
+            raise Refused(f"nothing to train on before {month}")
+        learned = train(past)
         asked = features[features["fold"] == month]
         said = learned.predict(asked)[QUANTILES].to_numpy(float)
         parts.append(pd.DataFrame(np.sort(said, axis=1), index=asked.index, columns=QUANTILES))
@@ -262,7 +273,7 @@ def _train_and_predict(
                 **learned.summary,
             }
         )
-    return pd.concat(parts).reindex(features.index), trainings, learned_until
+    return pd.concat(parts).reindex(features.index), trainings
 
 
 def reproduce(

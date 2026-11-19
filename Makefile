@@ -16,8 +16,9 @@ fmt:
 	uv run ruff check --fix .
 	uv run ruff format .
 
+# With the group ml: the trained models' tests need LightGBM
 test:
-	uv run pytest
+	uv run --group ml pytest
 
 # The warehouse rules with the settings in .env, those over compiled SQL included: compiling reads
 # no data but needs BigQuery, so `make test` skips them

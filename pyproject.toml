@@ -12,6 +12,7 @@ dev = [
 ]
 # MLflow for the backtest's tracking, apart from the image: `make dagster` adds it.
 ml = [
+    "lightgbm>=4.7.0",
     "mlflow>=3.18",
 ]
 notebook = [
