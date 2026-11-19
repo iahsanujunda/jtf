@@ -106,10 +106,21 @@ def test_refused_before_anything_is_stopped_or_pulled(git):
     assert log == []
 
 
-def test_nothing_to_pull_touches_nothing():
+def test_nothing_to_pull_still_reloads_with_the_sensors_stopped():
+    """On 2026-11-19 the checkout was pulled by hand: it was up to date, and Dagster still ran
+    the code it had loaded eight hours before."""
     log = []
-    assert run(FakeGit(log, new=OLD), FakeDagster(log)) == "already up to date"
-    assert log == []
+    said = run(FakeGit(log, new=OLD), FakeDagster(log, busy=[["r1"]]))
+    assert said.startswith("already up to date") and "reloaded" in said
+    assert log == [
+        ("stop", "automation"),
+        ("stop", "raw_bucket_sensor"),
+        ("runs", 1),
+        ("runs", 0),
+        ("reload",),
+        ("start", "automation"),
+        ("start", "raw_bucket_sensor"),
+    ]
 
 
 def test_runs_that_never_finish_leave_the_old_code_running_with_its_sensors():

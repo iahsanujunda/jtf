@@ -45,7 +45,7 @@ Labels and outcomes are dbt models and predictions are appended by `jtf.ml` unde
 ## Release (new)
 
 1. **A pull request:** `main` takes changes only through one. CI runs the `jtf` job (ruff, unit tests, Dagster's definitions) and, for the warehouse, the `warehouse` job (unit tests, an empty build and the rules, in datasets of its own that read no real data), and the `e2e` job (the time machine's guarantees on a world of real raw files, [e2e_tests](../e2e_tests/README.md)) ([workflows](../.github/workflows/README.md))
-2. **After the merge, in the main checkout: `make dagster-update`.** It stops the sensors, waits for running runs, pulls, reloads the code location and starts the sensors again. If dependencies changed it refuses: stop `make dagster`, then `git pull`, `make setup` and `make dagster`
+2. **After the merge, in the main checkout: `make dagster-update`.** It stops the sensors, waits for running runs, pulls, reloads the code location and starts the sensors again. With nothing to pull it still reloads, so run it too after a pull by hand: Dagster keeps running the code it loaded until a reload. If dependencies changed it refuses: stop `make dagster`, then `git pull`, `make setup` and `make dagster`
 3. **Check after, in the data:**
    - A changed model rebuilds only when one of its inputs updates, so materialize it and what reads it in the UI (not a run's assets, `ads/ads_ml_prediction_solar` and `ml/solar_backtest_metrics`: materializing them makes a model run, not a rebuild), then look at its rows, not only its checks: a table that is consistently behind passes every check of it agreeing with itself
    - A new asset or check shows in the UI
