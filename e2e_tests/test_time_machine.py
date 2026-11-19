@@ -81,14 +81,17 @@ def test_one_day_goes_from_raw_files_to_a_forecast_and_every_check_passes(world)
     # The seven days back reach before capture start at both times: read from history, by rule
     assert (mean["decision_times"], mean["exact"], mean["approximate"]) == (2, 0, 2)
     # The world is too young for a week of forecasts, so the scaled mean falls back to the mean:
-    # the same predictions from more inputs, the forecast among them
+    # the same prediction in every slot, from more inputs, the forecast among them. Compared slot
+    # by slot: two float sums of the same values need not come out equal
     said = world.query(f"""
-        select model, countif(predicted_mw is null) as empty, sum(predicted_mw) as total
-        from `{world.table("ads", "ads_ml_prediction_solar")}`
-        where run_id in ('e2e-one-day-mean', 'e2e-one-day-scaled')
-        group by model order by model
-    """)
-    assert list(said["empty"]) == [0, 0] and said["total"].nunique() == 1
+        select count(*) as slots, countif(a.predicted_mw is null) as empty,
+            countif(a.predicted_mw != b.predicted_mw) as different
+        from `{world.table("ads", "ads_ml_prediction_solar")}` as a
+        inner join `{world.table("ads", "ads_ml_prediction_solar")}` as b
+            using (decision_time, slot_start)
+        where a.run_id = 'e2e-one-day-scaled' and b.run_id = 'e2e-one-day-mean'
+    """).iloc[0]
+    assert (said["slots"], said["empty"], said["different"]) == (96, 0, 0)
     assert (
         scaled["decision_times"] == 2 and scaled["inputs_fingerprint"] != mean["inputs_fingerprint"]
     )
