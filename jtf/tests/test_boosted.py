@@ -43,7 +43,7 @@ def world(days: int = 120) -> pd.DataFrame:
     wobble = ((day * 13 + slot * 7) % 11 - 5) / 500
     return pd.DataFrame(
         {
-            "decision_time": slot_start.floor("D") - pd.Timedelta(hours=24),
+            "decision_time": (midnight - pd.Timedelta(hours=15)).tz_convert("UTC"),  # 09:00, D−1
             "target_day": [d.date() for d in midnight],
             "slot_start": slot_start,
             "capacity_mw": CAPACITY,

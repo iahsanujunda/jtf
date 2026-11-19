@@ -14,6 +14,7 @@ PERSISTENCE = "persistence_d2"
 MEAN_7D = "mean_7d"
 MEAN_7D_RANGE = "mean_7d_range"
 MEAN_7D_SCALED = "mean_7d_scaled"
+BOOSTED = "lgbm_quantiles"
 FIRST_TEST_MONTH = date(2025, 3, 1)
 BACKTEST = "backtest"
 

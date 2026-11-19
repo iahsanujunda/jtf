@@ -1,10 +1,18 @@
 """MLflow, local in phase 1 (plan, Tracking): `mlflow.db` and `mlruns/` at the repository root,
 both gitignored, unless MLFLOW_TRACKING_URI names another store. MLflow is the dependency group
-`ml`, imported only when a backtest logs, so the capture image never carries it."""
+`ml`, imported only when a backtest logs, so the capture image never carries it.
 
+The record of a run is its row in `ads_ml_runs`, and its code is its commit. What is logged here
+is a copy to read by, keyed by the run ID: each entry says what code and what data its run came
+from, and links to the commit and to the run in Dagster."""
+
+import json
 import os
+import re
 import subprocess
+import tempfile
 import time
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
 
@@ -21,19 +29,82 @@ def tracking_uri() -> str:
     return os.environ.get("MLFLOW_TRACKING_URI") or f"sqlite:///{REPO / 'mlflow.db'}"
 
 
+# Where the two UIs are, for the links between a run in one and its entry in the other
+DAGSTER_URL, MLFLOW_URL = "http://localhost:3000", "http://localhost:5000"
+FINGERPRINTS = ["inputs_fingerprint", "training_fingerprint", "outputs_fingerprint"]
+# What a run's training rows are read from (warehouse.BacktestWarehouse.training)
+TRAINING_TABLES = ["dws_solar_features", "ads_ml_label_solar", "dim_daylight"]
+
+
+def _git(*args: str) -> str:
+    done = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+def web_url(remote: str) -> str:
+    """A git remote as the address of its page: `git@host:owner/repo.git` and
+    `https://user@host/owner/repo.git` both give `https://host/owner/repo`."""
+    address = re.sub(r"^(?:ssh://)?git@([^:/]+)[:/]", r"https://\1/", remote)
+    return re.sub(r"^(https?://)[^@/]+@", r"\1", address).removesuffix(".git")
+
+
 def git_state() -> dict[str, str]:
-    """The commit the code came from, and whether it had uncommitted changes. Empty in the image,
-    which carries no git: its digest names the code there."""
+    """The commit the code came from, whether it had uncommitted changes, and where the
+    repository is published, if it has a remote. Empty in the image, which carries no git: its
+    digest names the code there."""
     try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True, check=True
-        ).stdout.strip()
-        changes = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=REPO, capture_output=True, text=True, check=True
-        ).stdout.strip()
+        state = {
+            "git_commit": _git("rev-parse", "HEAD"),
+            "git_dirty": str(bool(_git("status", "--porcelain"))).lower(),
+        }
     except (OSError, subprocess.CalledProcessError):
         return {}
-    return {"git_commit": commit, "git_dirty": str(bool(changes)).lower()}
+    try:
+        return state | {"git_url": web_url(_git("remote", "get-url", "origin"))}
+    except subprocess.CalledProcessError:
+        return state
+
+
+def links(run: Mapping) -> dict[str, str]:
+    """Where a run's code and its Dagster run can be opened: the commit's page, if the repository
+    is published, and the run in Dagster's UI (JTF_DAGSTER_URL, else the local one)."""
+    dagster = os.environ.get("JTF_DAGSTER_URL") or DAGSTER_URL
+    found = {"dagster_run": f"{dagster.rstrip('/')}/runs/{run['run_id']}"}
+    if run.get("git_url") and run.get("git_commit"):
+        found["code"] = f"{run['git_url']}/tree/{run['git_commit']}"
+    return found
+
+
+def mlflow_link(experiment_id: str, mlflow_run_id: str) -> str:
+    """An entry in MLflow's UI (JTF_MLFLOW_URL, else the local one)."""
+    base = (os.environ.get("JTF_MLFLOW_URL") or MLFLOW_URL).rstrip("/")
+    return f"{base}/#/experiments/{experiment_id}/runs/{mlflow_run_id}"
+
+
+def identity(run: Mapping) -> dict[str, str]:
+    """What an MLflow entry says about the run it belongs to, as tags: the run's commit and its
+    fingerprints as it recorded them (not the code that happens to be checked out when the entry
+    is written), MLflow's own tags for the source, which it can't fill itself for a run Dagster
+    started, and a description with the links. `run` is the run's record, with `git_url` if the
+    repository is published."""
+    commit = run.get("git_commit") or ""
+    dirty = str(run.get("tree_dirty")).lower() == "true"
+    found = links(run)
+    prints = {name: str(run[name]) for name in FINGERPRINTS if pd.notna(run.get(name))}
+    source = {"git_commit": commit, "git_dirty": str(dirty).lower()}
+    if commit:
+        source |= {"mlflow.source.git.commit": commit, "mlflow.source.type": "PROJECT"}
+    if run.get("git_url"):
+        url = run["git_url"]
+        source |= {"mlflow.source.name": url, "mlflow.source.git.repoURL": url}
+    code = f"[`{commit[:7]}`]({found['code']})" if "code" in found else f"`{commit[:7] or '?'}`"
+    changed = ", **with uncommitted changes**: the commit is not all of it" if dirty else ""
+    note = [
+        f"Code: {code}{changed}",
+        f"Dagster run: [`{str(run['run_id'])[:8]}`]({found['dagster_run']})",
+        *[f"{name.replace('_', ' ').capitalize()}: `{value}`" for name, value in prints.items()],
+    ]
+    return prints | source | {"mlflow.note.content": "\n\n".join(note)}
 
 
 def run_code() -> dict[str, str]:
@@ -49,11 +120,13 @@ def group_metrics(groups: pd.DataFrame) -> dict[str, float]:
     return dict(zip(names, long["value"].astype(float), strict=True))
 
 
-def log_trainings(*, run_id: str, model: str, trainings: list[dict]) -> str:
+def log_trainings(*, run: Mapping, trainings: list[dict], rows: pd.DataFrame) -> tuple[str, str]:
     """One MLflow run for the trainings of one run of a trained model: per month of target days,
-    what it learned from (its last day, its size), how the training went, the trained model's
-    file and the file's hash. The files are for looking into a past month's model: a reproduce
-    trains again and never reads them. Returns MLflow's run ID."""
+    what it learned from (its last day, its size, its fingerprint), how the training went, the
+    trained model's file and the file's hash; and once, the rows they all learned from (each
+    month's set is those rows up to its last day) with what they were read from. The files are
+    for looking into a past month's model: a reproduce trains again and never reads them.
+    Returns MLflow's run ID and a link to it."""
     import mlflow
     from mlflow.entities import Metric
 
@@ -65,15 +138,16 @@ def log_trainings(*, run_id: str, model: str, trainings: list[dict]) -> str:
         if experiment
         else client.create_experiment(TRAININGS, artifact_location=(REPO / "mlruns").as_uri())
     )
+    run_id, model = run["run_id"], run["model"]
     table = pd.DataFrame(trainings).drop(columns="file")
-    numbers = table.drop(columns=["fold", "last_training_day", "sha256"])
-    with mlflow.start_run(experiment_id=experiment_id, run_name=f"{model} {run_id[:8]}") as run:
+    numbers = table.drop(columns=["fold", "last_training_day", "sha256", "training_fingerprint"])
+    with mlflow.start_run(experiment_id=experiment_id, run_name=f"{model} {run_id[:8]}") as logged:
         mlflow.set_tags(
             {
                 "dagster_run_id": run_id,
                 "model": model,
                 "image_digest": os.environ.get("JTF_IMAGE_DIGEST", ""),
-                **git_state(),
+                **identity(run),
             }
         )
         mlflow.log_params(
@@ -86,7 +160,7 @@ def log_trainings(*, run_id: str, model: str, trainings: list[dict]) -> str:
         now = int(time.time() * 1000)
         long = numbers.reset_index().melt(id_vars="index").dropna(subset="value")
         client.log_batch(
-            run.info.run_id,
+            logged.info.run_id,
             metrics=[
                 Metric(key=name, value=float(value), timestamp=now, step=int(step))
                 for step, name, value in long.itertuples(index=False)
@@ -96,23 +170,44 @@ def log_trainings(*, run_id: str, model: str, trainings: list[dict]) -> str:
         names = "models/" + table["fold"].astype(str) + ".txt"
         files = [training["file"] for training in trainings]
         [mlflow.log_text(file, name) for file, name in zip(files, names, strict=True)]
-    return run.info.run_id
+        _log_training_rows(rows)
+    return logged.info.run_id, mlflow_link(experiment_id, logged.info.run_id)
+
+
+def _log_training_rows(rows: pd.DataFrame) -> None:
+    """The rows a run's trainings learned from, as a Parquet file under `training/` of the
+    active MLflow run, and beside it what they are: the tables read, the columns, the days."""
+    import mlflow
+
+    days = pd.to_datetime(rows["target_day"])  # a plain date, readable without BigQuery's types
+    described = {
+        "tables": TRAINING_TABLES,
+        "columns": list(rows.columns),
+        "first_target_day": str(days.min().date()),
+        "last_target_day": str(days.max().date()),
+        "rows": len(rows),
+    }
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "rows.parquet"
+        rows.assign(target_day=days).to_parquet(path, index=False)
+        mlflow.log_artifact(str(path), "training")
+    mlflow.log_text(json.dumps(described, indent=2), "training/set.json")
 
 
 def log_backtest(
     *,
-    run_id: str,
-    model: str,
+    run: Mapping,
     first_month: date,
     last_month: date,
     per_fold: pd.DataFrame,
     overall: dict[str, float],
     groups: pd.DataFrame,
     fidelity: dict[str, int],
-) -> str:
+) -> tuple[str, str]:
     """One MLflow run per model per backtest: the overall metrics, each metric per fold as a step
     (MLflow draws them over the folds), each per kind of day (`sky/clear/mae_share`), and the
-    tables of folds and of groups. Returns MLflow's run ID."""
+    tables of folds and of groups. `run` is what the run recorded of itself. Returns MLflow's
+    run ID and a link to it."""
     import mlflow
     from mlflow.entities import Metric
 
@@ -124,14 +219,15 @@ def log_backtest(
         if experiment
         else client.create_experiment(EXPERIMENT, artifact_location=(REPO / "mlruns").as_uri())
     )
-    with mlflow.start_run(experiment_id=experiment_id, run_name=f"{model} {run_id[:8]}") as run:
+    run_id, model = run["run_id"], run["model"]
+    with mlflow.start_run(experiment_id=experiment_id, run_name=f"{model} {run_id[:8]}") as logged:
         mlflow.set_tags(
             {
                 "dagster_run_id": run_id,
                 "model": model,
                 "mode": "backtest",
                 "image_digest": os.environ.get("JTF_IMAGE_DIGEST", ""),
-                **git_state(),
+                **identity(run),
             }
         )
         mlflow.log_params(
@@ -148,7 +244,7 @@ def log_backtest(
         mlflow.log_metrics(group_metrics(groups))
         now = int(time.time() * 1000)
         client.log_batch(
-            run.info.run_id,
+            logged.info.run_id,
             metrics=[
                 Metric(key=f"fold_{name}", value=float(value), timestamp=now, step=step)
                 for name in SCORES
@@ -158,4 +254,4 @@ def log_backtest(
         )
         mlflow.log_text(per_fold.to_csv(index=False), "folds.csv")
         mlflow.log_text(groups.to_csv(index=False), "groups.csv")
-    return run.info.run_id
+    return logged.info.run_id, mlflow_link(experiment_id, logged.info.run_id)
