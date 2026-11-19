@@ -27,7 +27,7 @@ from jtf.ml.backtest import (
     month,
 )
 from jtf.ml.replay import Mismatch, Refused, reproduce, run, target_day
-from jtf.ml.tracking import log_backtest, run_code
+from jtf.ml.tracking import log_backtest, log_trainings, run_code
 from jtf.orchestration.resources import Datasets
 
 PREDICTIONS = dg.AssetKey(["ads", "ads_ml_prediction_solar"])
@@ -99,8 +99,13 @@ def solar_predictions(
             )
     except (Refused, Mismatch) as e:
         raise dg.Failure(description=str(e)) from e
+    trained = {}
+    if record["trainings"]:  # a trained model: each month's training logged, its file kept
+        logged = log_trainings(run_id=run_id, model=record["model"], trainings=record["trainings"])
+        trained = {"trainings": len(record["trainings"]), "trainings_mlflow_run_id": logged}
     return dg.MaterializeResult(
         metadata={
+            **trained,
             "run_id": run_id,
             "mode": record["mode"],
             "model": record["model"],

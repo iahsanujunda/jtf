@@ -21,4 +21,10 @@ sources:
           - name: fold
             description: The first day of the target day's month, the backtest's test month.
           - name: predicted_mw
-            description: The point forecast in MW, averaged over the slot.
+            description: >
+              The point forecast in MW, averaged over the slot: the middle (P50) of a prediction
+              that has a range.
+          - name: p10_mw
+            description: The low of the range, exceeded nine times in ten; null without a range.
+          - name: p90_mw
+            description: The high of the range, exceeded one time in ten; null without a range.
