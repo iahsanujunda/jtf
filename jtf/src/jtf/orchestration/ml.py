@@ -27,7 +27,7 @@ from jtf.ml.backtest import (
     month,
 )
 from jtf.ml.replay import Mismatch, Refused, reproduce, run, target_day
-from jtf.ml.tracking import log_backtest, log_trainings, run_code
+from jtf.ml.tracking import FINGERPRINTS, links, log_backtest, log_trainings, run_code
 from jtf.orchestration.resources import Datasets
 
 PREDICTIONS = dg.AssetKey(["ads", "ads_ml_prediction_solar"])
@@ -75,14 +75,14 @@ def _days(config: RunConfig, warehouse) -> tuple[date, date]:
 def solar_predictions(
     context: dg.AssetExecutionContext, config: RunConfig, datasets: Datasets
 ) -> dg.MaterializeResult:
-    warehouse, run_id = datasets.backtest(), context.run.run_id
+    warehouse, run_id, code = datasets.backtest(), context.run.run_id, run_code()
     now = lambda: datetime.now(UTC)  # noqa: E731
     try:
         if config.mode == "reproduce":
             if not config.reproduces:
                 raise Refused("a reproduce needs the run it reproduces")
             record = reproduce(
-                warehouse, run_id=run_id, original=config.reproduces, code=run_code(), now=now
+                warehouse, run_id=run_id, original=config.reproduces, code=code, now=now
             )
         else:
             first, last = _days(config, warehouse)
@@ -93,19 +93,34 @@ def solar_predictions(
                 model=config.model,
                 first_day=first,
                 last_day=last,
-                code=run_code(),
+                code=code,
                 now=now,
                 fault=config.fault,
             )
     except (Refused, Mismatch) as e:
         raise dg.Failure(description=str(e)) from e
+    # What the run was made from, kept with the materialization: the metrics read it from there
+    made_from = {
+        name: record[name]
+        for name in ["git_commit", "tree_dirty", *FINGERPRINTS]
+        if pd.notna(record[name])
+    } | ({"git_url": code["git_url"]} if code.get("git_url") else {})
+    opened = links(record | made_from)
     trained = {}
-    if record["trainings"]:  # a trained model: each month's training logged, its file kept
-        logged = log_trainings(run_id=run_id, model=record["model"], trainings=record["trainings"])
-        trained = {"trainings": len(record["trainings"]), "trainings_mlflow_run_id": logged}
+    if record["trainings"]:  # a trained model: each month's training logged, its files kept
+        logged, link = log_trainings(
+            run=record | made_from, trainings=record["trainings"], rows=record["training_rows"]
+        )
+        trained = {
+            "trainings": len(record["trainings"]),
+            "trainings_mlflow_run_id": logged,
+            "trainings_in_mlflow": dg.MetadataValue.url(link),
+        }
     return dg.MaterializeResult(
         metadata={
             **trained,
+            **made_from,
+            **({"code": dg.MetadataValue.url(opened["code"])} if "code" in opened else {}),
             "run_id": run_id,
             "mode": record["mode"],
             "model": record["model"],
@@ -142,9 +157,8 @@ def solar_backtest_metrics(
     groups = by_group(outcomes)
     if len(per_fold) != len(folds):
         raise dg.Failure(f"{len(per_fold)} folds scored, {len(folds)} predicted")
-    mlflow_run_id = log_backtest(
-        run_id=run["run_id"],
-        model=run["model"],
+    mlflow_run_id, link = log_backtest(
+        run=run,
         first_month=first_month,
         last_month=last_month,
         per_fold=per_fold,
@@ -158,7 +172,13 @@ def solar_backtest_metrics(
         f"mae_share_{g}": float(v) for g, v in zip(sky["group"], sky["mae_share"], strict=True)
     }
     return dg.MaterializeResult(
-        metadata={"run_id": run["run_id"], "mlflow_run_id": mlflow_run_id, **overall, **by_sky}
+        metadata={
+            "run_id": run["run_id"],
+            "mlflow_run_id": mlflow_run_id,
+            "in_mlflow": dg.MetadataValue.url(link),
+            **overall,
+            **by_sky,
+        }
     )
 
 

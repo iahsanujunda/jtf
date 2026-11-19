@@ -98,13 +98,17 @@ class BacktestWarehouse:
 
     def features(self, first_day: date, last_day: date, columns: tuple[str, ...]) -> pd.DataFrame:
         """The keys and `columns` of dws_solar_features for the target days `first_day` to
-        `last_day`, each row with its fold (the target day's month), sorted so that the same days
+        `last_day`, each row with its fold (the target day's month) and whether its slot is in
+        daylight (dim_daylight: the sun's place, known beforehand), sorted so that the same days
         always give the same frame."""
         sql = f"""
-            select date_trunc(target_day, month) as fold, {", ".join([*KEY_COLUMNS, *columns])}
-            from `{self.table("dws", "dws_solar_features")}`
-            where target_day between @first and @last
-            order by decision_time, slot_start
+            select date_trunc(f.target_day, month) as fold,
+                {", ".join(f"f.{c}" for c in [*KEY_COLUMNS, *columns])},
+                not d.is_night as is_daylight
+            from `{self.table("dws", "dws_solar_features")}` as f
+            left join `{self.table("dim", "dim_daylight")}` as d using (slot_start)
+            where f.target_day between @first and @last
+            order by f.decision_time, f.slot_start
         """
         return self._query(sql, first=("DATE", first_day), last=("DATE", last_day))
 
@@ -137,12 +141,26 @@ class BacktestWarehouse:
         sql = f"{self._training_rows(columns)} order by decision_time, slot_start"
         return self._query(sql, last=("DATE", last_day))
 
-    def training_fingerprint(self, last_day: date, columns: tuple[str, ...]) -> str:
-        """Those rows fingerprinted, labels included: a label revised later shows as changed."""
+    def training_fingerprints(
+        self, last_days: list[date], columns: tuple[str, ...]
+    ) -> dict[date, str]:
+        """Per last day, the rows `training` gives up to it, fingerprinted, labels included: a
+        label revised later shows as changed, in every training that learned from it."""
         names = [*KEY_COLUMNS, *columns, "label_mw", "is_daylight"]
-        rows = self._training_rows(columns)
-        sql = f"select {fingerprint_of(names)} as fingerprint from ({rows}) as t"
-        return self._query(sql, last=("DATE", last_day))["fingerprint"].iloc[0]
+        sql = f"""
+            select last_day, {fingerprint_of(names)} as fingerprint
+            from unnest(@last_days) as last_day
+            inner join ({self._training_rows(columns)}) as t on t.target_day <= last_day
+            group by last_day
+        """
+        config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("last", "DATE", max(last_days)),
+                bigquery.ArrayQueryParameter("last_days", "DATE", sorted(set(last_days))),
+            ]
+        )
+        found = self.client.query(sql, job_config=config).to_dataframe()
+        return dict(zip(found["last_day"], found["fingerprint"], strict=True))
 
     def outputs_fingerprint(self, run_id: str) -> str:
         """A run's predictions fingerprinted, without its run ID and mode."""

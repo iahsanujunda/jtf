@@ -7,10 +7,11 @@ from datetime import UTC, date, datetime, timedelta
 import pandas as pd
 import pytest
 
-from jtf.ml.backtest import MEAN_7D, MEAN_7D_RANGE, QUANTILES
-from jtf.ml.models import half_hour, scaled_mean, train_miss_by_hour
+from jtf.ml.backtest import BOOSTED, MEAN_7D, MEAN_7D_RANGE, QUANTILES
+from jtf.ml.models import KEPT_INPUTS, columns_of, half_hour, scaled_mean, train_miss_by_hour
 from jtf.ml.replay import MODELS, Mismatch, Model, Refused, reproduce, run, training_cutoff
 from jtf.ml.warehouse import KEY_COLUMNS, OUTPUT_COLUMNS
+from test_boosted import world as lit_world
 
 CODE = {"git_commit": "abc123", "git_dirty": "false", "image_digest": ""}
 NOW = lambda: datetime(2026, 11, 18, 12, 0, tzinfo=UTC)  # noqa: E731
@@ -51,8 +52,8 @@ class FakeWarehouse:
         return self.rows[self.rows["target_day"].between(first_day, last_day)]
 
     def features(self, first_day, last_day, columns):
-        rows = self._days(first_day, last_day)
-        return rows[["fold", *KEY_COLUMNS, *columns]].reset_index(drop=True)
+        self.features_asked, rows = columns, self._days(first_day, last_day)
+        return rows[["fold", *KEY_COLUMNS, *columns, "is_daylight"]].reset_index(drop=True)
 
     def inputs_fingerprint(self, first_day, last_day, columns):
         return fingerprint(self._days(first_day, last_day), [*KEY_COLUMNS, *columns])
@@ -61,8 +62,9 @@ class FakeWarehouse:
         rows = self.rows[self.rows["target_day"] <= last_day]
         return rows[[*KEY_COLUMNS, *columns, "label_mw", "is_daylight"]].reset_index(drop=True)
 
-    def training_fingerprint(self, last_day, columns):
-        return fingerprint(self.training(last_day, columns), [*columns, "label_mw"])
+    def training_fingerprints(self, last_days, columns):
+        names = [*columns, "label_mw"]
+        return {day: fingerprint(self.training(day, columns), names) for day in last_days}
 
     def append_predictions(self, rows):
         self.predictions.append(rows)
@@ -72,6 +74,7 @@ class FakeWarehouse:
         return fingerprint(rows[rows["run_id"] == run_id], OUTPUT_COLUMNS)
 
     def fidelity(self, first_day, last_day, inputs):
+        self.fidelity_asked_of = inputs
         times = self._days(first_day, last_day)["decision_time"].unique()
         return pd.Series(False, index=times)
 
@@ -125,6 +128,42 @@ def test_every_training_keeps_its_file_and_the_files_hash(warehouse):
         len(s) == 64 for _, s in files.values()
     )
     assert record["trainings"][0]["training_slots"] == 30
+
+
+def test_every_training_carries_the_fingerprint_of_the_rows_it_learned_from(warehouse):
+    record = a_run(warehouse)
+
+    columns = MODELS[MEAN_7D_RANGE].features
+    february, march = record["trainings"]
+    assert (
+        february["training_fingerprint"]
+        == warehouse.training_fingerprints([date(2026, 1, 30)], columns)[date(2026, 1, 30)]
+    )
+    assert february["training_fingerprint"] != march["training_fingerprint"]
+    # The run's own is its last month's: that training learned from every row the run read
+    assert record["training_fingerprint"] == march["training_fingerprint"]
+    pd.testing.assert_frame_equal(
+        record["training_rows"], warehouse.training(date(2026, 2, 27), columns)
+    )
+
+
+def test_the_boosted_model_is_run_month_by_month_and_a_reproduce_matches():
+    lit = lit_world()
+    warehouse = FakeWarehouse(lit.assign(fold=[d.replace(day=1) for d in lit["target_day"]]))
+    days = {"first": date(2025, 3, 1), "last": date(2025, 4, 30)}
+
+    record = a_run(warehouse, model=BOOSTED, **days)
+    again = reproduce(warehouse, run_id="r2", original="r1", code=CODE, now=NOW)
+
+    assert warehouse.features_asked == columns_of(KEPT_INPUTS)
+    assert warehouse.fidelity_asked_of == ("actuals_7d", "weather", "capacity")
+    assert [t["fold"] for t in record["trainings"]] == [date(2025, 3, 1), date(2025, 4, 1)]
+    assert again["outputs_fingerprint"] == record["outputs_fingerprint"]
+    assert [t["sha256"] for t in again["trainings"]] == [t["sha256"] for t in record["trainings"]]
+    said = warehouse.predictions[0].merge(lit[["slot_start", "is_daylight"]], on="slot_start")
+    assert len(said) == 61 * 48 and said["predicted_mw"].notna().all()
+    assert (said.loc[~said["is_daylight"], ["p10_mw", "predicted_mw", "p90_mw"]] == 0).all().all()
+    assert said.loc[said["is_daylight"], "predicted_mw"].gt(0).mean() > 0.9
 
 
 def test_a_low_never_lies_above_a_high_whatever_the_model_says(warehouse, monkeypatch):

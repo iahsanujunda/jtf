@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from jtf.ml.backtest import (
+    BOOSTED,
     MEAN_7D,
     MEAN_7D_RANGE,
     MEAN_7D_SCALED,
@@ -38,7 +39,7 @@ from jtf.ml.backtest import (
     PREDICTION_COLUMNS,
     QUANTILES,
 )
-from jtf.ml.models import scaled_mean, train_miss_by_hour
+from jtf.ml.models import KEPT_INPUTS, columns_of, scaled_mean, train_boosted, train_miss_by_hour
 
 MODES = ("backtest", "what-if", "reproduce")
 RUN_COLUMNS = [
@@ -122,6 +123,15 @@ MODELS = {
         ("actuals_7d", "capacity"),
         train=train_miss_by_hour,
     ),
+    # Three gradient-boosted models, a low, a middle and a high, given the forecast for the slot,
+    # the past week and the sun's place: the model (notebook 11)
+    BOOSTED: Model(
+        BOOSTED,
+        "1",
+        columns_of(KEPT_INPUTS),
+        ("actuals_7d", "weather", "capacity"),
+        train=train_boosted,
+    ),
 }
 
 
@@ -147,7 +157,8 @@ class Mismatch(Exception):
 
 class RunWarehouse(Protocol):
     def features(self, first_day: date, last_day: date, columns: tuple[str, ...]) -> pd.DataFrame:
-        """The key columns, the fold and `columns` of dws_solar_features for the target days."""
+        """The key columns, the fold and `columns` of dws_solar_features for the target days, and
+        whether each slot is in daylight."""
         ...
 
     def inputs_fingerprint(
@@ -161,7 +172,11 @@ class RunWarehouse(Protocol):
         label and whether the slot is daylight, sorted."""
         ...
 
-    def training_fingerprint(self, last_day: date, columns: tuple[str, ...]) -> str: ...
+    def training_fingerprints(
+        self, last_days: list[date], columns: tuple[str, ...]
+    ) -> dict[date, str]:
+        """Per last day, the fingerprint of what `training` gives up to it."""
+        ...
 
     def fidelity(self, first_day: date, last_day: date, inputs: tuple[str, ...]) -> pd.Series:
         """Per decision time of the target days, whether every input is exact."""
@@ -198,11 +213,11 @@ def run(
     if features.empty:
         raise Refused(f"no features for target days {first_day} to {last_day}")
     if spec.train:
-        said, trainings, learned_until = _train_and_predict(warehouse, spec, features)
-        training_fingerprint = warehouse.training_fingerprint(learned_until, spec.features)
+        said, trainings, known = _train_and_predict(warehouse, spec, features)
+        training_fingerprint = trainings[-1]["training_fingerprint"]  # the last month's: all of it
     else:
         said = pd.DataFrame({"predicted_mw": spec.predict(features)}).reindex(columns=QUANTILES)
-        trainings, training_fingerprint = [], None
+        trainings, known, training_fingerprint = [], None, None
     rows = features.assign(run_id=run_id, model=spec.name, mode=mode, **said)[PREDICTION_COLUMNS]
     warehouse.append_predictions(rows)
     exact = warehouse.fidelity(first_day, last_day, spec.inputs)
@@ -228,21 +243,28 @@ def run(
         "finished_at": now(),
     }
     warehouse.append_run(pd.DataFrame([record], columns=RUN_COLUMNS))
-    return record | {"trainings": trainings}
+    return record | {"trainings": trainings, "training_rows": known}
 
 
 def _train_and_predict(
     warehouse: RunWarehouse, spec: Model, features: pd.DataFrame
-) -> tuple[pd.DataFrame, list[dict], date]:
+) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """The model trained month by month on what the warehouse knew, and its predictions. Returns
-    them with what each training was and the last day any of them learned from."""
+    them with what each training was, its training set's fingerprint included, and the rows all
+    of them learned from: each month's set is those rows up to its last day."""
     learned_until = training_cutoff(max(features["fold"]))
     known = warehouse.training(learned_until, spec.features)
     try:
         said, trainings = train_by_month(spec.train, known, features)
     except Refused as e:
         raise Refused(f"{spec.name}: {e}") from e
-    return said, trainings, learned_until
+    last_days = [training["last_training_day"] for training in trainings]
+    fingerprints = warehouse.training_fingerprints(last_days, spec.features)
+    trainings = [
+        training | {"training_fingerprint": fingerprints[training["last_training_day"]]}
+        for training in trainings
+    ]
+    return said, trainings, known
 
 
 def train_by_month(
