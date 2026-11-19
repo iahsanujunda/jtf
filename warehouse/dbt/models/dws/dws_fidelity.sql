@@ -12,8 +12,10 @@
     whose files are unchanged since its known_at is exact: its figures are the published ones and
     the rule never dates it early, so it is as precise as a capture
 
-  A run is exact at T only where every input its model reads is (ads_ml_runs). The seven days of
-  actuals the ratio baseline reads join with that feature, in step 7.
+  - actuals_7d: the versions of the slots of D−8 to D−2 current at T, delivered and curtailed,
+    which the seven-day mean reads. Approximate while any of the seven days was read from history
+
+  A run is exact at T only where every input its model reads is (ads_ml_runs).
 #}
 
 with decisions as (
@@ -33,6 +35,23 @@ actuals_d2 as (
             v.measure = 'solar'
             and date(v.slot_start, 'Asia/Tokyo') = date_sub(d.target_day, interval 2 day)
             and {{ as_of('v', 'd.decision_time') }}
+    group by d.decision_time, d.target_day
+),
+
+actuals_7d as (
+    select
+        d.decision_time,
+        d.target_day,
+        'actuals_7d' as input,
+        count(*) as versions_read,
+        countif(w.basis = 'rule') as approximate_versions
+    from decisions as d
+    inner join {{ ref('dwd_tepco_actuals') }} as w
+        on
+            w.measure in ('solar', 'solar_curtailed')
+            and date(w.slot_start, 'Asia/Tokyo')
+            between date_sub(d.target_day, interval 8 day) and date_sub(d.target_day, interval 2 day)
+            and {{ as_of('w', 'd.decision_time') }}
     group by d.decision_time, d.target_day
 ),
 
@@ -67,6 +86,8 @@ capacity as (
 
 inputs as (
     select * from actuals_d2
+    union all
+    select * from actuals_7d
     union all
     select * from weather
     union all

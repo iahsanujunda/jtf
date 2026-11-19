@@ -11,6 +11,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 PERSISTENCE = "persistence_d2"
+MEAN_7D = "mean_7d"
 FIRST_TEST_MONTH = date(2025, 3, 1)
 BACKTEST = "backtest"
 

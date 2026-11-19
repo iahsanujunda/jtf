@@ -6,9 +6,9 @@ from datetime import UTC, date, datetime
 import pandas as pd
 import pytest
 
-from jtf.ml.backtest import PERSISTENCE
+from jtf.ml.backtest import MEAN_7D, PERSISTENCE
 from jtf.ml.replay import MODELS, Mismatch, Model, Refused, reproduce, run, target_day
-from jtf.ml.warehouse import FEATURE_COLUMNS, OUTPUT_COLUMNS
+from jtf.ml.warehouse import KEY_COLUMNS, OUTPUT_COLUMNS
 
 CODE = {"git_commit": "abc123", "git_dirty": "false", "image_digest": ""}
 NOW = lambda: datetime(2026, 11, 18, 12, 0, tzinfo=UTC)  # noqa: E731
@@ -28,11 +28,13 @@ class FakeRunWarehouse:
     def _days(self, rows, first_day, last_day):
         return rows[(rows["target_day"] >= first_day) & (rows["target_day"] <= last_day)]
 
-    def features(self, first_day, last_day):
-        return self._days(self.feature_rows, first_day, last_day).reset_index(drop=True)
+    def features(self, first_day, last_day, columns):
+        rows = self._days(self.feature_rows, first_day, last_day)
+        return rows[["fold", *KEY_COLUMNS, *columns]].reset_index(drop=True)
 
-    def inputs_fingerprint(self, first_day, last_day):
-        return fingerprint(self._days(self.feature_rows, first_day, last_day), FEATURE_COLUMNS)
+    def inputs_fingerprint(self, first_day, last_day, columns):
+        rows = self._days(self.feature_rows, first_day, last_day)
+        return fingerprint(rows, [*KEY_COLUMNS, *columns])
 
     def append_predictions(self, rows):
         self.predictions.append(rows)
@@ -42,6 +44,7 @@ class FakeRunWarehouse:
         return fingerprint(rows[rows["run_id"] == run_id], OUTPUT_COLUMNS)
 
     def fidelity(self, first_day, last_day, inputs):
+        self.fidelity_asked_of = inputs
         return self.exact
 
     def append_run(self, record):
@@ -70,6 +73,7 @@ def warehouse():
                 utc=True,
             ),
             "solar_d2_mw": [5000.0, 5100.0, 6000.0, None],
+            "solar_mean_7d_mw": [4000.0, 4100.0, 4200.0, 4300.0],
         }
     )
     exact = pd.Series([False, True], index=times)  # the 16th's D−2 was partly rule-dated
@@ -101,6 +105,34 @@ def test_a_run_appends_its_predictions_and_one_record_with_its_code_and_fidelity
     assert record["git_commit"] == "abc123" and record["tree_dirty"] is False
     assert record["decision_times"] == 2 and (record["exact"], record["approximate"]) == (1, 1)
     assert record["inputs_fingerprint"] and record["outputs_fingerprint"]
+
+
+def test_each_model_predicts_from_its_own_feature_and_fingerprints_only_what_it_reads(warehouse):
+    days = {"mode": "what-if", "first_day": date(2026, 11, 17), "last_day": date(2026, 11, 18)}
+    before = {
+        model: run(warehouse, run_id=f"{model}-1", model=model, code=CODE, now=NOW, **days)
+        for model in (PERSISTENCE, MEAN_7D)
+    }
+    mean = warehouse.predictions[-1]
+    assert list(mean["predicted_mw"]) == [4000.0, 4100.0, 4200.0, 4300.0]
+    assert set(mean["model"]) == {MEAN_7D} and before[MEAN_7D]["model_version"] == "1"
+
+    warehouse.feature_rows.loc[0, "solar_d2_mw"] = 4999.0  # only persistence reads this
+    after = {
+        model: run(warehouse, run_id=f"{model}-2", model=model, code=CODE, now=NOW, **days)
+        for model in (PERSISTENCE, MEAN_7D)
+    }
+    assert after[MEAN_7D]["inputs_fingerprint"] == before[MEAN_7D]["inputs_fingerprint"]
+    assert after[PERSISTENCE]["inputs_fingerprint"] != before[PERSISTENCE]["inputs_fingerprint"]
+
+
+@pytest.mark.parametrize(
+    ("model", "inputs"), [(PERSISTENCE, ("actuals_d2",)), (MEAN_7D, ("actuals_7d",))]
+)
+def test_a_run_is_exact_only_where_the_inputs_its_model_reads_are(warehouse, model, inputs):
+    days = {"first_day": date(2026, 11, 17), "last_day": date(2026, 11, 18)}
+    run(warehouse, run_id="r1", mode="what-if", model=model, code=CODE, now=NOW, **days)
+    assert warehouse.fidelity_asked_of == inputs
 
 
 def test_the_target_day_is_the_day_after_the_decision_time_in_jst():
@@ -170,7 +202,9 @@ def test_a_reproduce_says_when_the_data_changed(warehouse):
 
 def test_a_reproduce_says_when_the_code_changed(warehouse, monkeypatch):
     what_if(warehouse, "r1")
-    changed = Model(PERSISTENCE, "1", ("actuals_d2",), lambda f: f["solar_d2_mw"] * 1.01)
+    changed = Model(
+        PERSISTENCE, "1", ("solar_d2_mw",), ("actuals_d2",), lambda f: f["solar_d2_mw"] * 1.01
+    )
     monkeypatch.setitem(MODELS, PERSISTENCE, changed)
 
     with pytest.raises(Mismatch, match="the code did"):

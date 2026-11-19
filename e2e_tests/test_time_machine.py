@@ -21,7 +21,7 @@ from harness import (
     differences,
 )
 
-from jtf.ml.backtest import PERSISTENCE
+from jtf.ml.backtest import MEAN_7D, PERSISTENCE
 from jtf.ml.replay import reproduce, run
 from jtf.parse.fingerprint import verify
 
@@ -29,8 +29,10 @@ NOW = lambda: datetime.now(UTC)  # noqa: E731
 SEEN = ["model", "decision_time"]
 
 
-def what_if(world, run_id: str, first: date = FIRST_DAY, last: date = LAST_DAY) -> dict:
-    args = {"mode": "what-if", "model": PERSISTENCE, "code": CODE, "now": NOW}
+def what_if(
+    world, run_id: str, first: date = FIRST_DAY, last: date = LAST_DAY, model: str = PERSISTENCE
+) -> dict:
+    args = {"mode": "what-if", "model": model, "code": CODE, "now": NOW}
     return run(world.warehouse(), run_id=run_id, first_day=first, last_day=last, **args)
 
 
@@ -47,17 +49,20 @@ def stored(world, run_id: str) -> pd.Series:
 
 def test_one_day_goes_from_raw_files_to_a_forecast_and_every_check_passes(world):
     record = what_if(world, "e2e-one-day", date(2026, 11, 17), date(2026, 11, 18))
+    mean = what_if(world, "e2e-one-day-mean", date(2026, 11, 17), date(2026, 11, 18), MEAN_7D)
     world.dbt("run", "--select", "ads_ml_outcome_solar")
     world.dbt("test", "--exclude", "test_type:unit", *NOT_IN_THE_WINDOW)
 
     features = world.query(f"""
         select decision_time, count(*) as slots, countif(solar_d2_mw is null) as without_d2,
+            countif(solar_mean_7d_mw is null) as without_mean_7d,
             countif(capacity_mw is null or clear_sky_mw is null) as without_capacity
         from `{world.table("dws", "dws_solar_features")}`
         group by decision_time order by decision_time
     """)
     assert list(features["decision_time"]) == DECISION_TIMES
     assert set(features["slots"]) == {48} and set(features["without_d2"]) == {0}
+    assert set(features["without_mean_7d"]) == {0}
     assert set(features["without_capacity"]) == {0}
     outcomes = world.query(f"""
         select target_day, count(*) as slots, countif(label_mw is not null) as labelled
@@ -70,6 +75,8 @@ def test_one_day_goes_from_raw_files_to_a_forecast_and_every_check_passes(world)
     # D−2 read at 09:00 on the 16th was partly dated by rule, and on the 17th all captured
     assert (record["decision_times"], record["exact"], record["approximate"]) == (2, 1, 1)
     assert stored(world, "e2e-one-day")[["exact", "approximate"]].tolist() == [1, 1]
+    # The seven days back reach before capture start at both times: read from history, by rule
+    assert (mean["decision_times"], mean["exact"], mean["approximate"]) == (2, 0, 2)
 
 
 def test_a_rebuild_and_a_second_run_of_the_same_days_are_identical(world):
@@ -87,6 +94,9 @@ def test_a_rebuild_and_a_second_run_of_the_same_days_are_identical(world):
 def test_a_reproduce_of_a_what_if_run_matches_it_exactly(world):
     what_if(world, "e2e-reproduce")
     again(world, "e2e-reproduce")  # raises Mismatch unless both fingerprints match
+    what_if(world, "e2e-reproduce-mean", model=MEAN_7D)
+    again(world, "e2e-reproduce-mean")
+    assert stored(world, "e2e-reproduce-mean-again")["model"] == MEAN_7D
 
     original, reproduced = stored(world, "e2e-reproduce"), stored(world, "e2e-reproduce-again")
     assert (reproduced["mode"], reproduced["reproduces"]) == ("reproduce", "e2e-reproduce")
@@ -123,6 +133,7 @@ def absurd_weather(body: bytes) -> bytes:
 def test_rows_known_after_t_with_absurd_values_change_nothing_at_t(world, tmp_path):
     before = world.seen()
     what_if(world, "e2e-poison")
+    what_if(world, "e2e-poison-mean", model=MEAN_7D)
     for source, name, change in [
         ("tepco_actuals", "_eria_jukyu_202611_03.csv", absurd_actuals),
         ("openmeteo_live", "_forecast.json", absurd_weather),
@@ -150,6 +161,7 @@ def test_rows_known_after_t_with_absurd_values_change_nothing_at_t(world, tmp_pa
     assert (poisoned["planted"] > 0).all(), poisoned
     assert_unchanged(before, world.seen(), SEEN)
     again(world, "e2e-poison")
+    again(world, "e2e-poison-mean")  # the seven days it reads were all poisoned after T
 
 
 # The time of a late history load, after the window: "now" in the world's time
@@ -185,6 +197,7 @@ def versions_read(world, times: list[pd.Timestamp]) -> pd.DataFrame:
 def test_a_late_history_load_changes_nothing_a_past_decision_time_saw(world, tmp_path):
     before, read_before = world.seen(), versions_read(world, PAST)
     what_if(world, "e2e-backfill")
+    what_if(world, "e2e-backfill-mean", model=MEAN_7D)
     (october,) = [f for f in LATE.rglob("*.csv")]  # a month the world has no file of
     november = world.newest("tepco_actuals", "_eria_jukyu_202611_03.csv")
     world.plant(tmp_path, october, fetched_at=LOADED_LATE_AT, load_type="initial")
@@ -222,3 +235,4 @@ def test_a_late_history_load_changes_nothing_a_past_decision_time_saw(world, tmp
     assert (newest["known_at"], newest["basis"]) == (LOADED_LATE_AT, "captured")
     assert newest["value_mw"] == versions["value_mw"].iloc[0] + CORRECTION_MW
     again(world, "e2e-backfill")
+    again(world, "e2e-backfill-mean")  # the corrected slot is one of the seven days it reads

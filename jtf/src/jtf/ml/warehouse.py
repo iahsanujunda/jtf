@@ -12,9 +12,9 @@ from jtf.parse.fingerprint import ROW_JSON
 
 PREDICTIONS = "ads_ml_prediction_solar"
 RUNS = "ads_ml_runs"
-# What a run reads of the features, and the part of its predictions a reproduce must match: not
-# its run ID or mode, which differ by design
-FEATURE_COLUMNS = ["decision_time", "target_day", "slot_start", "solar_d2_mw"]
+# What every run reads of the features beside its model's own columns, and the part of its
+# predictions a reproduce must match: not its run ID or mode, which differ by design
+KEY_COLUMNS = ["decision_time", "target_day", "slot_start"]
 OUTPUT_COLUMNS = ["model", "decision_time", "target_day", "slot_start", "predicted_mw"]
 
 PREDICTION_SCHEMA = [
@@ -83,21 +83,23 @@ class BacktestWarehouse:
         day = self._query(sql)["day"].iloc[0]
         return None if pd.isna(day) else day
 
-    def features(self, first_day: date, last_day: date) -> pd.DataFrame:
-        """dws_solar_features for the target days `first_day` to `last_day`, each row with its
-        fold (the target day's month), sorted so that the same days always give the same frame."""
+    def features(self, first_day: date, last_day: date, columns: tuple[str, ...]) -> pd.DataFrame:
+        """The keys and `columns` of dws_solar_features for the target days `first_day` to
+        `last_day`, each row with its fold (the target day's month), sorted so that the same days
+        always give the same frame."""
         sql = f"""
-            select date_trunc(target_day, month) as fold, {", ".join(FEATURE_COLUMNS)}
+            select date_trunc(target_day, month) as fold, {", ".join([*KEY_COLUMNS, *columns])}
             from `{self.table("dws", "dws_solar_features")}`
             where target_day between @first and @last
             order by decision_time, slot_start
         """
         return self._query(sql, first=("DATE", first_day), last=("DATE", last_day))
 
-    def inputs_fingerprint(self, first_day: date, last_day: date) -> str:
-        """The features a run of these target days reads, fingerprinted."""
+    def inputs_fingerprint(self, first_day: date, last_day: date, columns: tuple[str, ...]) -> str:
+        """The features a run of these target days reads, fingerprinted: its model's columns and
+        no others, so a feature it doesn't read can change without the run looking different."""
         sql = f"""
-            select {fingerprint_of(FEATURE_COLUMNS)} as fingerprint
+            select {fingerprint_of([*KEY_COLUMNS, *columns])} as fingerprint
             from `{self.table("dws", "dws_solar_features")}` as t
             where target_day between @first and @last
         """

@@ -5,14 +5,14 @@
 - `what-if`: any range of target days, with the code checked out now
 - `reproduce`: an earlier run again, which must match it exactly
 
-A run reads the features of its target days from DWS (as known at each decision time: DWS reads
-DWD through `as_of`), predicts, appends its predictions to ADS under its run ID, and records itself:
-its code, its fidelity per decision time (`dws_fidelity`, counted over the inputs its model reads)
-and fingerprints of the features it read and the predictions it wrote, the function the ODS check
-uses. A reproduce compares both: different inputs mean the data changed, different outputs with
-the same inputs mean the code did. Until images exist, a run's code is its git commit, so a
-reproduce refuses on another commit or a tree with uncommitted changes. A run that fails records
-nothing; Dagster keeps the failure.
+A run reads the features its model names, for its target days, from DWS (as known at each decision
+time: DWS reads DWD through `as_of`), predicts, appends its predictions to ADS under its run ID, and
+records itself: its code, its fidelity per decision time (`dws_fidelity`, counted over the inputs
+its model reads) and fingerprints of the features it read and the predictions it wrote, the function
+the ODS check uses. A reproduce compares both: different inputs mean the data changed, different
+outputs with the same inputs mean the code did. Until images exist, a run's code is its git commit,
+so a reproduce refuses on another commit or a tree with uncommitted changes. A run that fails
+records nothing; Dagster keeps the failure.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Protocol
 
 import pandas as pd
 
-from jtf.ml.backtest import PERSISTENCE, PREDICTION_COLUMNS
+from jtf.ml.backtest import MEAN_7D, PERSISTENCE, PREDICTION_COLUMNS
 
 MODES = ("backtest", "what-if", "reproduce")
 RUN_COLUMNS = [
@@ -53,13 +53,21 @@ RUN_COLUMNS = [
 class Model:
     name: str
     version: str
-    inputs: tuple[str, ...]  # what it reads, as dws_fidelity names them
+    features: tuple[str, ...]  # the columns of dws_solar_features it reads, and no others
+    inputs: tuple[str, ...]  # what those are made from, as dws_fidelity names them
     predict: Callable[[pd.DataFrame], pd.Series]
 
 
 MODELS = {
     # The same slot on D−2, the newest day complete at T: the baseline every model must beat
-    PERSISTENCE: Model(PERSISTENCE, "1", ("actuals_d2",), lambda f: f["solar_d2_mw"]),
+    PERSISTENCE: Model(
+        PERSISTENCE, "1", ("solar_d2_mw",), ("actuals_d2",), lambda f: f["solar_d2_mw"]
+    ),
+    # The mean of the same slot over the seven days D−8 to D−2: the stronger baseline. Clear sky
+    # times a recent ratio gives the same forecast (notebook 09, section 5)
+    MEAN_7D: Model(
+        MEAN_7D, "1", ("solar_mean_7d_mw",), ("actuals_7d",), lambda f: f["solar_mean_7d_mw"]
+    ),
 }
 
 
@@ -77,8 +85,14 @@ class Mismatch(Exception):
 
 
 class RunWarehouse(Protocol):
-    def features(self, first_day: date, last_day: date) -> pd.DataFrame: ...
-    def inputs_fingerprint(self, first_day: date, last_day: date) -> str: ...
+    def features(self, first_day: date, last_day: date, columns: tuple[str, ...]) -> pd.DataFrame:
+        """The key columns, the fold and `columns` of dws_solar_features for the target days."""
+        ...
+
+    def inputs_fingerprint(
+        self, first_day: date, last_day: date, columns: tuple[str, ...]
+    ) -> str: ...
+
     def append_predictions(self, rows: pd.DataFrame) -> None: ...
     def outputs_fingerprint(self, run_id: str) -> str: ...
     def fidelity(self, first_day: date, last_day: date, inputs: tuple[str, ...]) -> pd.Series:
@@ -112,7 +126,7 @@ def run(
         raise Refused("no fault presets yet: they come with step 8")
     started = now()
     spec = MODELS[model]
-    features = warehouse.features(first_day, last_day)
+    features = warehouse.features(first_day, last_day, spec.features)
     if features.empty:
         raise Refused(f"no features for target days {first_day} to {last_day}")
     rows = features.assign(
@@ -135,7 +149,7 @@ def run(
         "exact": int(exact.sum()),
         "approximate": int((~exact).sum()),
         "fault": fault,
-        "inputs_fingerprint": warehouse.inputs_fingerprint(first_day, last_day),
+        "inputs_fingerprint": warehouse.inputs_fingerprint(first_day, last_day, spec.features),
         "outputs_fingerprint": warehouse.outputs_fingerprint(run_id),
         "started_at": started,
         "finished_at": now(),
