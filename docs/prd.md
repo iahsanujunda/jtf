@@ -520,7 +520,7 @@ The MVP succeeds if the solar model beats persistence in an as-of backtest and t
 
 - Confirm the 10:00 D−1 gate closure in the JEPX trading guide itself; so far it comes from secondary sources quoting it, and the 09:00 decision time assumes it
 - Demand forecast for residual load: OCCTO's next-day area demand, if it is published before the gate and archived (to probe), or a simple temperature model
-- Solar label on curtailed slots: delivered output, or delivered plus curtailed
+- Solar label on curtailed slots: settled, delivered plus curtailed ([notebook 08](../notebooks/08_solar_label.ipynb)). Open: how large and how late TEPCO's revisions to either figure are
 - When TEPCO publishes its next-day forecast in the evening (captured twice until known)
 - The real availability delay of each weather model, measured from our captures, to replace the assumed delays
 - Which weather runs cover D's late slots for M2, since short MSM runs end at 21:00 JST on D
