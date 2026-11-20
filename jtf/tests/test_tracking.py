@@ -182,6 +182,7 @@ def test_a_run_in_dagster_shows_what_it_was_made_from_and_links_to_its_entries(s
     assert shown["git_commit"] == "abc1234def" and shown["tree_dirty"] is False
     assert shown["training_fingerprint"] == WAREHOUSE.runs[0].iloc[0]["training_fingerprint"]
     assert shown["inputs_fingerprint"] and shown["outputs_fingerprint"]
+    assert shown["degraded"] == 0 and "fault" not in shown
     entry = store.get_run(shown["trainings_mlflow_run_id"])
     assert shown["trainings_in_mlflow"].endswith(f"/runs/{entry.info.run_id}")
     assert entry.data.tags["dagster_run_id"] == shown["run_id"] == result.run_id

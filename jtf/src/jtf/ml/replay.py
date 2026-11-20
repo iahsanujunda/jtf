@@ -17,6 +17,12 @@ the ODS check uses. A reproduce compares both: different inputs mean the data ch
 outputs with the same inputs mean the code did. Until images exist, a run's code is its git commit,
 so a reproduce refuses on another commit or a tree with uncommitted changes. A run that fails
 records nothing; Dagster keeps the failure.
+
+A model that reads the day's weather names a fallback. Where that weather is not there at a
+decision time, the capture being late, the whole target day is answered by the fallback, each
+prediction says which level it was made at, and the run counts the decision times it degraded
+(plan, Fallback ladder; notebooks/14_a_forecast_without_the_days_weather.ipynb: given empty
+weather the model itself reads a dark day). A fault preset injects such a failure on purpose.
 """
 
 from __future__ import annotations
@@ -32,9 +38,11 @@ import pandas as pd
 
 from jtf.ml.backtest import (
     BOOSTED,
+    FALLBACK,
     MEAN_7D,
     MEAN_7D_RANGE,
     MEAN_7D_SCALED,
+    NORMAL,
     PERSISTENCE,
     PREDICTION_COLUMNS,
     QUANTILES,
@@ -57,6 +65,7 @@ RUN_COLUMNS = [
     "exact",
     "approximate",
     "fault",
+    "degraded",
     "inputs_fingerprint",
     "outputs_fingerprint",
     "training_fingerprint",
@@ -89,6 +98,15 @@ class Model:
     inputs: tuple[str, ...]  # what those are made from, as dws_fidelity names them
     predict: Callable[[pd.DataFrame], pd.Series] | None = None
     train: Callable[[pd.DataFrame], Trained] | None = None
+    weather: tuple[str, ...] = ()  # of its features, the day's weather: late if the capture is
+    fallback: str | None = None  # the model that answers a day whose weather is late
+
+
+# The weather forecast for the slot itself, read from the morning's capture. The week's forecast
+# is not among them: it was read on earlier mornings
+DAYS_WEATHER = tuple(
+    c for c in columns_of(KEPT_INPUTS) if c.startswith("forecast_") and "mean_7d" not in c
+)
 
 
 MODELS = {
@@ -114,6 +132,8 @@ MODELS = {
         ),
         ("actuals_7d", "weather", "capacity"),
         scaled_mean,
+        weather=("forecast_ghi_w_m2",),
+        fallback=MEAN_7D,
     ),
     # The seven-day mean with a range learned from its past misses: the simplest trained model
     MEAN_7D_RANGE: Model(
@@ -131,8 +151,20 @@ MODELS = {
         columns_of(KEPT_INPUTS),
         ("actuals_7d", "weather", "capacity"),
         train=train_boosted,
+        weather=DAYS_WEATHER,
+        fallback=MEAN_7D_RANGE,
     ),
 }
+
+
+def late_weather(features: pd.DataFrame, spec: Model) -> pd.DataFrame:
+    """F1: the morning's weather capture has not arrived by the decision time, on every day asked.
+    The day's weather is emptied, as the feature table has it when no capture covers the day."""
+    return features.assign(**{column: float("nan") for column in spec.weather})
+
+
+# Faults a run can be given on purpose (plan, Fault scenarios), each applied to the features read
+FAULTS = {"F1": late_weather}
 
 
 def training_cutoff(month: date) -> date:
@@ -205,20 +237,32 @@ def run(
         raise Refused(f"mode {mode!r} is not one of {MODES}")
     if model not in MODELS:
         raise Refused(f"no model {model!r}: {sorted(MODELS)}")
-    if fault:
-        raise Refused("no fault presets yet: they come with step 8")
+    if fault and fault not in FAULTS:
+        raise Refused(f"no fault {fault!r}: {sorted(FAULTS)}")
     started = now()
     spec = MODELS[model]
-    features = warehouse.features(first_day, last_day, spec.features)
+    behind = MODELS[spec.fallback].features if spec.fallback else ()
+    features = warehouse.features(
+        first_day, last_day, tuple(dict.fromkeys([*spec.features, *behind]))
+    )
     if features.empty:
         raise Refused(f"no features for target days {first_day} to {last_day}")
+    if fault:
+        features = FAULTS[fault](features, spec)
+    late = _weather_is_late(features, spec)
     if spec.train:
         said, trainings, known = _train_and_predict(warehouse, spec, features)
         training_fingerprint = trainings[-1]["training_fingerprint"]  # the last month's: all of it
     else:
         said = pd.DataFrame({"predicted_mw": spec.predict(features)}).reindex(columns=QUANTILES)
         trainings, known, training_fingerprint = [], None, None
-    rows = features.assign(run_id=run_id, model=spec.name, mode=mode, **said)[PREDICTION_COLUMNS]
+    if late.any():
+        answered = _fallback(warehouse, spec, features[late])
+        said = said.copy()
+        said.loc[late, QUANTILES] = answered.loc[said.index[late], QUANTILES].to_numpy(float)
+    level = late.map({True: FALLBACK, False: NORMAL})
+    rows = features.assign(run_id=run_id, model=spec.name, mode=mode, level=level, **said)
+    rows = rows[PREDICTION_COLUMNS]
     warehouse.append_predictions(rows)
     exact = warehouse.fidelity(first_day, last_day, spec.inputs)
     record = {
@@ -236,6 +280,7 @@ def run(
         "exact": int(exact.sum()),
         "approximate": int((~exact).sum()),
         "fault": fault,
+        "degraded": int(features.loc[late, "decision_time"].nunique()),
         "inputs_fingerprint": warehouse.inputs_fingerprint(first_day, last_day, spec.features),
         "outputs_fingerprint": warehouse.outputs_fingerprint(run_id),
         "training_fingerprint": training_fingerprint,
@@ -244,6 +289,27 @@ def run(
     }
     warehouse.append_run(pd.DataFrame([record], columns=RUN_COLUMNS))
     return record | {"trainings": trainings, "training_rows": known}
+
+
+def _weather_is_late(features: pd.DataFrame, spec: Model) -> pd.Series:
+    """Per row, whether its decision time lacks any of the day's weather in a daylight slot. A
+    day is answered at one level: a morning with half its weather is a late morning."""
+    if not spec.weather:
+        return pd.Series(False, index=features.index)
+    missing = features[list(spec.weather)].isna().any(axis=1)
+    missing &= features["is_daylight"].astype(bool)
+    return missing.groupby(features["decision_time"]).transform("any").astype(bool)
+
+
+def _fallback(warehouse: RunWarehouse, spec: Model, features: pd.DataFrame) -> pd.DataFrame:
+    """The fallback model's forecasts for the rows whose weather is late, trained as it would be
+    in a run of its own. Its trainings are not the run's: the run records its model's."""
+    if spec.fallback is None:
+        raise Refused(f"{spec.name} has no fallback for a day without its weather")
+    other = MODELS[spec.fallback]
+    if other.train:
+        return _train_and_predict(warehouse, other, features)[0]
+    return pd.DataFrame({"predicted_mw": other.predict(features)}).reindex(columns=QUANTILES)
 
 
 def _train_and_predict(
@@ -324,6 +390,7 @@ def reproduce(
         last_day=target_day(then["last_decision_time"]),
         code=code,
         now=now,
+        fault=None if pd.isna(then.get("fault")) else then["fault"],
         reproduces=original,
     )
     differ = [side for side in CAUSES if not _same(record.get(side), then.get(side))]

@@ -28,3 +28,8 @@ sources:
             description: The low of the range, exceeded nine times in ten; null without a range.
           - name: p90_mw
             description: The high of the range, exceeded one time in ten; null without a range.
+          - name: level
+            description: >
+              What the forecast was made from: 0, what its model reads; 2, the model's fallback,
+              because the day's weather was not there at the decision time. Null in runs made
+              before levels were recorded.

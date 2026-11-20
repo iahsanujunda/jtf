@@ -59,7 +59,7 @@ class RunConfig(dg.Config):
     reproduces: str | None = None
     """A reproduce's original run ID."""
     fault: str | None = None
-    """A fault to inject; none exist until step 8."""
+    """A fault to inject on purpose: `F1`, the day's weather late at every decision time."""
 
 
 def _days(config: RunConfig, warehouse) -> tuple[date, date]:
@@ -141,6 +141,8 @@ def solar_predictions(
             "decision_times": record["decision_times"],
             "exact": record["exact"],
             "approximate": record["approximate"],
+            "degraded": record["degraded"],
+            **({"fault": record["fault"]} if record["fault"] else {}),
         }
     )
 

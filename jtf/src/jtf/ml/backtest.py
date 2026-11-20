@@ -29,9 +29,14 @@ PREDICTION_COLUMNS = [
     "predicted_mw",
     "p10_mw",
     "p90_mw",
+    "level",
 ]
 # The three forecasts of a slot, low to high: the middle one is the point forecast
 QUANTILES = ["p10_mw", "predicted_mw", "p90_mw"]
+# What a forecast was made from (plan, Fallback ladder). 0: what its model reads, the day's weather
+# among it. 2: the model's fallback, because the day's weather was not there at the decision time.
+# Level 1, an older forecast that still covers the day, has nothing to be made from yet
+NORMAL, FALLBACK = 0, 2
 
 
 def month(text: str) -> date:
@@ -66,6 +71,7 @@ def persistence(features: pd.DataFrame, run_id: str) -> pd.DataFrame:
         predicted_mw=features["solar_d2_mw"],
         p10_mw=float("nan"),
         p90_mw=float("nan"),
+        level=NORMAL,
     )[PREDICTION_COLUMNS]
 
 
