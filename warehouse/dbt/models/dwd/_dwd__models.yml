@@ -512,6 +512,135 @@ models:
           arguments:
             expression: known_at = fetched_at and known_until is null
 
+  - name: dwd_tepco_forecast_next_day
+    description: >
+      TEPCO's forecast for the next day, for its area, as versions: one row per slot, measure and
+      version, in MW averaged over the slot. Known from the first capture that held it, on the
+      evening before the day it forecasts, which is after that day's decision time: a yardstick
+      for a forecast, never an input to one (notebook 12).
+    columns:
+      - name: slot_start
+        description: The slot's start, as a timestamp (the file gives it in JST, as 1130).
+        data_tests: [not_null]
+      - name: measure
+        description: >
+          `wind_solar` (wind and solar together: TEPCO publishes no forecast of either alone),
+          `demand` or `generation`.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [wind_solar, demand, generation]
+      - name: value_mw
+        description: MW averaged over the slot (the file's kWh per half hour over 500).
+        data_tests: [not_null]
+      - name: known_at
+        description: The fetch time of the first capture holding this value. Never the parse time.
+        data_tests: [not_null]
+      - name: known_until
+        description: When the next version became known; null for the current one.
+      - name: basis
+        description: Always `captured`. TEPCO keeps no archive, so there is no history to date.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [captured]
+      - name: first_seen
+        description: The same fetch time.
+        data_tests: [not_null]
+      - name: source_file
+        description: That capture's file.
+        data_tests: [not_null]
+      - name: correction
+        description: True when this version replaced an earlier value.
+    data_tests:
+      - known_at_within_fetches:
+          name: dwd_tepco_forecast_next_day__no_known_at_after_newest_fetch
+          arguments:
+            sources: [tepco_area_forecast_next_day]
+      - unique_combination:
+          arguments:
+            columns: [slot_start, measure, known_at]
+      - expression_is_true:
+          arguments:
+            expression: known_until is null or known_until > known_at
+      - expression_is_true:
+          arguments:
+            expression: known_at = first_seen
+      - expression_is_true:
+          arguments:
+            expression: value_mw >= 0
+
+  - name: dwd_jepx_spot
+    description: >
+      JEPX's day-ahead spot prices as versions: one row per delivery slot, measure and version,
+      in yen per kWh. Read for a decision time only through `as_of`: the price of day D becomes
+      known on D−1 after bidding closes, so a forecast for D reads prices up to D−1's (notebook
+      12, section 5).
+    columns:
+      - name: slot_start
+        description: The delivery slot's start, as a timestamp (slot 1 starts at 00:00 JST).
+        data_tests: [not_null]
+      - name: measure
+        description: "`price_tokyo`, the Tokyo area price, or `price_system`, the system price."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [price_tokyo, price_system]
+      - name: value_yen_kwh
+        description: Yen per kWh.
+        data_tests: [not_null]
+      - name: known_at
+        description: When we could have had this version. Never the parse time.
+        data_tests: [not_null]
+      - name: known_until
+        description: When the next version became known; null for the current one.
+      - name: basis
+        description: >
+          `rule` (10:30 JST on the day before delivery, before capture start) or `captured` (the
+          fetch time of the first file holding this price).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [rule, captured]
+      - name: first_seen
+        description: Fetch time of the first file holding this price.
+        data_tests: [not_null]
+      - name: source_file
+        description: That file.
+        data_tests: [not_null]
+      - name: correction
+        description: True when this version replaced an earlier price.
+    data_tests:
+      # A rule never dates a version later than the fetch that first held it.
+      - expression_is_true:
+          name: dwd_jepx_spot__rule_never_after_its_first_fetch
+          arguments:
+            expression: basis != 'rule' or known_at <= first_seen
+      - known_at_within_fetches:
+          name: dwd_jepx_spot__no_known_at_after_newest_fetch
+          arguments:
+            sources: [jepx_spot]
+      - rule_before_capture_start:
+          name: dwd_jepx_spot__rule_only_before_capture_start
+          arguments:
+            source_name: jepx_spot
+      - unique_combination:
+          arguments:
+            columns: [slot_start, measure, known_at]
+      - expression_is_true:
+          arguments:
+            expression: known_until is null or known_until > known_at
+      - expression_is_true:
+          arguments:
+            expression: basis = 'rule' or known_at = first_seen
+      - expression_is_true:
+          arguments:
+            expression: value_yen_kwh >= 0
+
 unit_tests:
   # Times are UTC; JST is UTC+9. Capture start is the 08:45 JST daily capture of 2026-11-15
   # (2026-11-14 23:45 UTC). Slot A, 12:00 JST on 2026-11-14, has rule time 13:30 JST (04:30 UTC).
@@ -1010,3 +1139,92 @@ unit_tests:
       rows:
         - {source: tepco_actuals, source_file: a/1.csv, known_at: "2026-11-14 23:45:00+00", known_until: null}
 
+  # dwd_tepco_forecast_next_day. Times are UTC; JST is UTC+9. The file is captured at 19:00 and
+  # 22:00 JST (10:00 and 13:00 UTC) on the evening before the day it forecasts.
+
+  - name: a_forecast_is_known_from_its_first_capture_in_mw_by_slot_start
+    description: >
+      Both evening captures hold the same forecast for 16 November, and the first file was parsed
+      again after a wrong first parse. One version per measure: in MW (kWh per half hour over
+      500), keyed by the slot's start (1130 JST), known when the first capture was fetched. The
+      second capture is no version, and the wrong parse never becomes one.
+    model: dwd_tepco_forecast_next_day
+    given:
+      - input: source('ods', 'tepco_area_forecast_next_day')
+        rows:
+          - {source_file: f1, date: "20261116", slot_from: "1130", wind_solar_kwh: 1, demand_kwh: 16000000, generation_kwh: 15500000, fetched_at: "2026-11-15 10:00:00+00", ingested_at: "2026-11-15 10:05:00+00"}
+          - {source_file: f1, date: "20261116", slot_from: "1130", wind_solar_kwh: 6000000, demand_kwh: 16000000, generation_kwh: 15500000, fetched_at: "2026-11-15 10:00:00+00", ingested_at: "2026-11-17 00:00:00+00"}
+          - {source_file: f2, date: "20261116", slot_from: "1130", wind_solar_kwh: 6000000, demand_kwh: 16000000, generation_kwh: 15500000, fetched_at: "2026-11-15 13:00:00+00", ingested_at: "2026-11-15 13:05:00+00"}
+    expect:
+      rows:
+        - {slot_start: "2026-11-16 02:30:00+00", measure: wind_solar, value_mw: 12000, known_at: "2026-11-15 10:00:00+00", known_until: null, basis: captured, source_file: f1, correction: false}
+        - {slot_start: "2026-11-16 02:30:00+00", measure: demand, value_mw: 32000, known_at: "2026-11-15 10:00:00+00", known_until: null, basis: captured, source_file: f1, correction: false}
+        - {slot_start: "2026-11-16 02:30:00+00", measure: generation, value_mw: 31000, known_at: "2026-11-15 10:00:00+00", known_until: null, basis: captured, source_file: f1, correction: false}
+
+  - name: a_changed_forecast_is_a_new_version_and_an_empty_slot_is_none
+    description: >
+      The 22:00 capture changes wind and solar for one slot: a new version known at that fetch,
+      which ends the first. Demand is empty in both captures, as in the placeholder TEPCO leaves
+      overnight: no value, so no version.
+    model: dwd_tepco_forecast_next_day
+    given:
+      - input: source('ods', 'tepco_area_forecast_next_day')
+        rows:
+          - {source_file: f1, date: "20261116", slot_from: "0000", wind_solar_kwh: 50000, demand_kwh: null, generation_kwh: 9000000, fetched_at: "2026-11-15 10:00:00+00", ingested_at: "2026-11-15 10:05:00+00"}
+          - {source_file: f2, date: "20261116", slot_from: "0000", wind_solar_kwh: 60000, demand_kwh: null, generation_kwh: 9000000, fetched_at: "2026-11-15 13:00:00+00", ingested_at: "2026-11-15 13:05:00+00"}
+    expect:
+      rows:
+        - {slot_start: "2026-11-15 15:00:00+00", measure: wind_solar, value_mw: 100, known_at: "2026-11-15 10:00:00+00", known_until: "2026-11-15 13:00:00+00", basis: captured, source_file: f1, correction: false}
+        - {slot_start: "2026-11-15 15:00:00+00", measure: wind_solar, value_mw: 120, known_at: "2026-11-15 13:00:00+00", known_until: null, basis: captured, source_file: f2, correction: true}
+        - {slot_start: "2026-11-15 15:00:00+00", measure: generation, value_mw: 18000, known_at: "2026-11-15 10:00:00+00", known_until: null, basis: captured, source_file: f1, correction: false}
+
+  # dwd_jepx_spot. Times are UTC; JST is UTC+9. Capture start is the 11:08 JST daily capture of
+  # 2026-11-15 (02:08 UTC). The rule for delivery day X is 10:30 JST on X−1 (01:30 UTC on X−1).
+
+  - name: a_price_takes_the_rule_before_capture_start_and_its_fetch_after
+    description: >
+      Three delivery days. 16 November was in the first daily capture, but its rule time, 10:30
+      on the 15th, falls before capture start: the rule. 17 November was first seen in the
+      capture of the 16th, after capture start: that fetch. 1 March 2024 came in an initial load
+      fetched after capture start; its rule time is long before it: the rule. Slot 1 starts at
+      00:00 JST, slot 24 at 11:30.
+    model: dwd_jepx_spot
+    given:
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: jepx_spot, known_at: "2026-11-15 02:08:00+00"}
+          - {source: jepx_spot, known_at: "2026-11-16 02:00:00+00"}
+          - {source: tepco_actuals, known_at: "2026-11-10 23:45:00+00"}
+      - input: source('ods', 'jepx_spot')
+        rows:
+          - {source_file: d1, delivery_date: "2026/11/16", slot_code: 1, price_tokyo_yen_kwh: 30.5, system_price_yen_kwh: 29.0, fetched_at: "2026-11-15 02:08:00+00", ingested_at: "2026-11-15 02:10:00+00"}
+          - {source_file: d2, delivery_date: "2026/11/17", slot_code: 24, price_tokyo_yen_kwh: 12.0, system_price_yen_kwh: 11.5, fetched_at: "2026-11-16 02:00:00+00", ingested_at: "2026-11-16 02:05:00+00"}
+          - {source_file: i1, delivery_date: "2024/03/01", slot_code: 24, price_tokyo_yen_kwh: 8.0, system_price_yen_kwh: 7.5, fetched_at: "2026-11-15 04:52:00+00", ingested_at: "2026-11-15 05:00:00+00"}
+    expect:
+      rows:
+        - {slot_start: "2026-11-15 15:00:00+00", measure: price_tokyo, value_yen_kwh: 30.5, known_at: "2026-11-15 01:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2026-11-15 15:00:00+00", measure: price_system, value_yen_kwh: 29.0, known_at: "2026-11-15 01:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2026-11-17 02:30:00+00", measure: price_tokyo, value_yen_kwh: 12.0, known_at: "2026-11-16 02:00:00+00", known_until: null, basis: captured, correction: false}
+        - {slot_start: "2026-11-17 02:30:00+00", measure: price_system, value_yen_kwh: 11.5, known_at: "2026-11-16 02:00:00+00", known_until: null, basis: captured, correction: false}
+        - {slot_start: "2024-03-01 02:30:00+00", measure: price_tokyo, value_yen_kwh: 8.0, known_at: "2024-02-29 01:30:00+00", known_until: null, basis: rule, correction: false}
+        - {slot_start: "2024-03-01 02:30:00+00", measure: price_system, value_yen_kwh: 7.5, known_at: "2024-02-29 01:30:00+00", known_until: null, basis: rule, correction: false}
+
+  - name: the_same_price_again_is_no_version_and_a_changed_one_is
+    description: >
+      The price of a slot is in every daily file after it is set. Seen again unchanged, it is no
+      version. JEPX has never changed one; if it did, as the system price does here in the second
+      capture, the change is a version known at that fetch.
+    model: dwd_jepx_spot
+    given:
+      - input: ref('dwd_source_captures')
+        rows:
+          - {source: jepx_spot, known_at: "2026-11-15 02:08:00+00"}
+      - input: source('ods', 'jepx_spot')
+        rows:
+          - {source_file: d2, delivery_date: "2026/11/17", slot_code: 1, price_tokyo_yen_kwh: 30.0, system_price_yen_kwh: 28.0, fetched_at: "2026-11-16 02:00:00+00", ingested_at: "2026-11-16 02:05:00+00"}
+          - {source_file: d3, delivery_date: "2026/11/17", slot_code: 1, price_tokyo_yen_kwh: 30.0, system_price_yen_kwh: 28.5, fetched_at: "2026-11-17 02:00:00+00", ingested_at: "2026-11-17 02:05:00+00"}
+    expect:
+      rows:
+        - {slot_start: "2026-11-16 15:00:00+00", measure: price_tokyo, value_yen_kwh: 30.0, known_at: "2026-11-16 02:00:00+00", known_until: null, basis: captured, correction: false}
+        - {slot_start: "2026-11-16 15:00:00+00", measure: price_system, value_yen_kwh: 28.0, known_at: "2026-11-16 02:00:00+00", known_until: "2026-11-17 02:00:00+00", basis: captured, correction: false}
+        - {slot_start: "2026-11-16 15:00:00+00", measure: price_system, value_yen_kwh: 28.5, known_at: "2026-11-17 02:00:00+00", known_until: null, basis: captured, correction: true}
