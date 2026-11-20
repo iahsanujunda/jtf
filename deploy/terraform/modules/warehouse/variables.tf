@@ -19,3 +19,13 @@ variable "datasets" {
     ods = "Raw files as tables: the source's own values and labels, with lineage on every row"
   }
 }
+
+variable "dbt_prefix" {
+  description = <<-EOT
+    The prefix of dbt's datasets, <prefix>_<layer>, to declare them here beside ODS. Null leaves
+    them to dbt, which creates a dataset the first time it builds into one: right for dev, where
+    every developer and every CI run has a prefix of its own.
+  EOT
+  type        = string
+  default     = null
+}
