@@ -203,18 +203,20 @@ def test_the_price_weighted_error_weighs_each_miss_by_what_the_slot_was_worth():
 
 def test_a_run_beside_tepcos_forecast_is_scored_where_both_have_a_miss():
     # Capacity 20,000 MW. The 16th: the run misses by 0.03 and 0.01, TEPCO by 0.01 and 0.01. The
-    # 17th: one slot, 0.05 against 0.02. Left out: a night slot; a slot of the 18th with no
-    # actuals yet; and a slot of the 18th where only TEPCO has a miss, the run's wind two days
-    # back being unknown. So the 18th is no day of the comparison.
-    days = [date(2026, 11, 16)] * 3 + [date(2026, 11, 17)] + [date(2026, 11, 18)] * 2
+    # 17th: one slot, 0.05 against 0.02. Left out: a night slot. The 18th is still under way: its
+    # morning slot has both misses, its afternoon no actuals yet, so the day doesn't count, not
+    # even its morning. The 19th has a slot where only TEPCO has a miss, the run's wind two days
+    # back being unknown: no day of the comparison either.
+    days = [date(2026, 11, 16)] * 3 + [date(2026, 11, 17)]
+    days += [date(2026, 11, 18)] * 2 + [date(2026, 11, 19)]
     rows = pd.DataFrame(
         {
             "target_day": days,
-            "error_mw": [-600.0, 200.0, 5000.0, 1000.0, None, None],
-            "error_share": [-0.03, 0.01, 0.25, 0.05, None, None],
-            "tepco_error_mw": [200.0, -200.0, 5000.0, -400.0, None, 1800.0],
-            "tepco_error_share": [0.01, -0.01, 0.25, -0.02, None, 0.09],
-            "is_daylight": [True, True, False, True, True, True],
+            "error_mw": [-600.0, 200.0, 5000.0, 1000.0, 8000.0, None, None],
+            "error_share": [-0.03, 0.01, 0.25, 0.05, 0.4, None, None],
+            "tepco_error_mw": [200.0, -200.0, 5000.0, -400.0, 8000.0, None, 1800.0],
+            "tepco_error_share": [0.01, -0.01, 0.25, -0.02, 0.4, None, 0.09],
+            "is_daylight": [True, True, False, True, True, True, True],
         }
     )
     per_day, overall = benchmark(rows)

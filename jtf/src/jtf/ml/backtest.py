@@ -166,15 +166,14 @@ BESIDE = {
 
 def benchmark(rows: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
     """A run beside TEPCO's own forecast (ads_ml_benchmark_solar): per target day and overall,
-    each side's miss as a share of capacity and in MW, over the daylight slots where both have
-    one. Both are forecasts of wind and solar together. TEPCO's is made about ten hours later,
-    so it is a yardstick, not a rival. `days` and `slots` say how much the figures stand on; a
-    run that shares no day with TEPCO's capture has none, and only those two."""
-    scored = rows[
-        rows["is_daylight"].eq(True)
-        & rows["error_share"].notna()
-        & rows["tepco_error_share"].notna()
-    ]
+    each side's miss as a share of capacity and in MW, over daylight slots. Both are forecasts
+    of wind and solar together. TEPCO's is made about ten hours later, so it is a yardstick, not
+    a rival. A day counts once every one of its daylight slots has both misses: a day still
+    under way would be scored on its morning alone. `days` and `slots` say how much the figures
+    stand on; a run that shares no whole day with TEPCO's capture has none, and only those two."""
+    lit = rows[rows["is_daylight"].eq(True)]
+    both = lit["error_share"].notna() & lit["tepco_error_share"].notna()
+    scored = lit[both.groupby(lit["target_day"]).transform("all").astype(bool)]
     if scored.empty:
         return pd.DataFrame(columns=["target_day", *BESIDE]), {"days": 0, "slots": 0}
     scored = scored.assign(
