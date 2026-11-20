@@ -76,22 +76,37 @@ AGGREGATES = {
     "mae_mw": ("abs_mw", "mean"),
     "coverage": ("inside", "mean"),
     "pinball_share": ("pinball_share", "mean"),
+    "priced_miss": ("priced_miss", "sum"),
+    "price": ("price", "sum"),
 }
 RANGE = ["in_range", "pinball_share"]  # what only a prediction with a range has
+OPTIONAL = [*RANGE, "price_yen_kwh"]  # and what a slot not yet traded lacks
 
 
 def _scored(outcomes: pd.DataFrame) -> pd.DataFrame:
     """The daylight slots with a label, with what the aggregates read. `coverage` is the share of
     them whose label fell inside the range, to set against the 80% a P10 to P90 range should
     hold; it and the pinball loss are empty for a run with no range."""
-    outcomes = outcomes.reindex(columns=outcomes.columns.union(RANGE, sort=False))
+    outcomes = outcomes.reindex(columns=outcomes.columns.union(OPTIONAL, sort=False))
     scored = outcomes[outcomes["is_daylight"].eq(True) & outcomes["error_mw"].notna()]
+    price = scored["price_yen_kwh"].astype(float)
     return scored.assign(
         abs_share=scored["error_share"].abs(),
         abs_mw=scored["error_mw"].abs(),
         inside=scored["in_range"].astype("boolean").astype("Float64").astype(float),
         pinball_share=scored["pinball_share"].astype(float),
+        price=price,
+        priced_miss=scored["error_share"].abs() * price,  # empty where the slot has no price
     )
+
+
+def _priced(aggregated: pd.DataFrame) -> pd.DataFrame:
+    """The price-weighted error from its two sums: each slot's miss times the Tokyo price of the
+    slot, over the sum of those prices (plan, Metrics). It says how far off the forecast was
+    where a megawatt-hour was worth most, and stands beside the plain error, never in its place.
+    Empty where no scored slot has a price."""
+    weighted = aggregated["priced_miss"] / aggregated["price"].where(aggregated["price"] > 0)
+    return aggregated.drop(columns=["priced_miss", "price"]).assign(mae_share_priced=weighted)
 
 
 def metrics(outcomes: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
@@ -101,8 +116,9 @@ def metrics(outcomes: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
     so the means add the same floats in the same order every run.
     """
     scored = _scored(outcomes)
-    per_fold = scored.groupby("fold").agg(**AGGREGATES).dropna(axis=1, how="all").reset_index()
-    overall = scored.groupby(lambda _: "overall").agg(**AGGREGATES).iloc[0]
+    per_fold = _priced(scored.groupby("fold").agg(**AGGREGATES))
+    per_fold = per_fold.dropna(axis=1, how="all").reset_index()
+    overall = _priced(scored.groupby(lambda _: "overall").agg(**AGGREGATES)).iloc[0]
     return per_fold, {name: float(value) for name, value in overall.items() if pd.notna(value)}
 
 
@@ -126,10 +142,46 @@ def by_group(outcomes: pd.DataFrame) -> pd.DataFrame:
             "abs_mw",
             "inside",
             "pinball_share",
+            "price",
+            "priced_miss",
         ],
         value_vars=["sky", "curtailed", "season"],
         var_name="grouping",
         value_name="group",
     ).fillna({"group": NOT_YET})
     groups = long.groupby(["grouping", "group"]).agg(days=("target_day", "nunique"), **AGGREGATES)
-    return groups.dropna(axis=1, how="all").reset_index()  # no range, no range scores
+    return _priced(groups).dropna(axis=1, how="all").reset_index()  # no range, no range scores
+
+
+BESIDE = {
+    "slots": ("abs_share", "size"),
+    "mae_share": ("abs_share", "mean"),
+    "tepco_mae_share": ("tepco_abs_share", "mean"),
+    "bias_share": ("error_share", "mean"),
+    "tepco_bias_share": ("tepco_error_share", "mean"),
+    "mae_mw": ("abs_mw", "mean"),
+    "tepco_mae_mw": ("tepco_abs_mw", "mean"),
+}
+
+
+def benchmark(rows: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
+    """A run beside TEPCO's own forecast (ads_ml_benchmark_solar): per target day and overall,
+    each side's miss as a share of capacity and in MW, over daylight slots. Both are forecasts
+    of wind and solar together. TEPCO's is made about ten hours later, so it is a yardstick, not
+    a rival. A day counts once every one of its daylight slots has both misses: a day still
+    under way would be scored on its morning alone. `days` and `slots` say how much the figures
+    stand on; a run that shares no whole day with TEPCO's capture has none, and only those two."""
+    lit = rows[rows["is_daylight"].eq(True)]
+    both = lit["error_share"].notna() & lit["tepco_error_share"].notna()
+    scored = lit[both.groupby(lit["target_day"]).transform("all").astype(bool)]
+    if scored.empty:
+        return pd.DataFrame(columns=["target_day", *BESIDE]), {"days": 0, "slots": 0}
+    scored = scored.assign(
+        abs_share=scored["error_share"].abs(),
+        tepco_abs_share=scored["tepco_error_share"].abs(),
+        abs_mw=scored["error_mw"].abs(),
+        tepco_abs_mw=scored["tepco_error_mw"].abs(),
+    )
+    per_day = scored.groupby("target_day").agg(**BESIDE).reset_index()
+    overall = scored.groupby(lambda _: "overall").agg(**BESIDE).iloc[0]
+    return per_day, {"days": len(per_day)} | {name: float(v) for name, v in overall.items()}

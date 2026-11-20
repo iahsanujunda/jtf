@@ -228,10 +228,22 @@ class BacktestWarehouse:
         time."""
         sql = f"""
             select fold, decision_time, target_day, slot_start, error_mw, error_share,
-                is_daylight, in_range, pinball_share, sky, is_curtailed_day, season
+                is_daylight, in_range, pinball_share, sky, is_curtailed_day, season,
+                price_yen_kwh
             from `{self.table("ads", "ads_ml_outcome_solar")}`
             where run_id = @run_id
             order by fold, decision_time, slot_start
+        """
+        return self._query(sql, run_id=("STRING", run_id))
+
+    def benchmark(self, run_id: str) -> pd.DataFrame:
+        """One run's rows of ads_ml_benchmark_solar, its forecasts beside TEPCO's, sorted."""
+        sql = f"""
+            select decision_time, target_day, slot_start, error_mw, error_share,
+                tepco_error_mw, tepco_error_share, is_daylight
+            from `{self.table("ads", "ads_ml_benchmark_solar")}`
+            where run_id = @run_id
+            order by decision_time, slot_start
         """
         return self._query(sql, run_id=("STRING", run_id))
 

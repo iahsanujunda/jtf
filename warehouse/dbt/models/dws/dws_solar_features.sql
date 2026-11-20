@@ -2,6 +2,9 @@
   Solar features per decision time and target slot, as known at T, for every decision time in one
   pass. Reads DWD only through as_of, and other DWS models by decision time.
   - solar_d2_mw: the same slot on D−2, the newest day complete at T (notebook 04, section 5.3)
+  - wind_d2_mw: the same slot's wind on D−2. Not an input to the solar model: the stand-in for
+    wind when a solar forecast is set against TEPCO's forecast of wind and solar together
+    (notebooks/12_tepco_forecast_as_yardstick.ipynb, section 2)
   - solar_mean_7d_mw: the mean of the same slot over D−8 to D−2, the last seven days complete at
     T, delivered and curtailed output added, each at the version current at T; null unless all
     seven days are known. The second baseline, and an input to the model
@@ -69,6 +72,7 @@ select
     s.target_day,
     s.slot_start,
     d2.value_mw as solar_d2_mw,
+    wd2.value_mw as wind_d2_mw,
     if(wk.readings = 14, cast(wk.mw / 7 as float64), null) as solar_mean_7d_mw,
     c.capacity_mw,
     cast(cast(c.capacity_mw as numeric) * cs.ghi / 1000 as float64) as clear_sky_mw,
@@ -83,6 +87,10 @@ left join {{ ref('dwd_tepco_actuals') }} as d2
     on d2.measure = 'solar'
     and d2.slot_start = timestamp_sub(s.slot_start, interval 2 day)
     and {{ as_of('d2', 's.decision_time') }}
+left join {{ ref('dwd_tepco_actuals') }} as wd2
+    on wd2.measure = 'wind'
+    and wd2.slot_start = timestamp_sub(s.slot_start, interval 2 day)
+    and {{ as_of('wd2', 's.decision_time') }}
 left join week as wk
     on wk.decision_time = s.decision_time and wk.slot_start = s.slot_start
 left join {{ ref('dws_capacity') }} as c

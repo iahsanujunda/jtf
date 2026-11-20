@@ -7,6 +7,7 @@ from jtf.ml.backtest import (
     NOT_YET,
     PERSISTENCE,
     PREDICTION_COLUMNS,
+    benchmark,
     by_group,
     fold_months,
     last_complete_month,
@@ -165,3 +166,91 @@ def test_a_run_with_a_range_is_also_scored_by_its_coverage_and_pinball_loss():
     no_range = outcomes.drop(columns=["in_range", "pinball_share"])
     assert set(metrics(no_range)[1]) == {"slots", "mae_share", "bias_share", "mae_mw"}
     assert "coverage" not in by_group(no_range) and "coverage" not in metrics(no_range)[0]
+
+
+def test_the_price_weighted_error_weighs_each_miss_by_what_the_slot_was_worth():
+    # March: misses of 0.01 at 10 yen and 0.03 at 30 yen: (0.1 + 0.9) / 40 = 0.025, where the
+    # plain error is 0.02. April: a miss of 0.02 at 20 yen, and one of 0.5 in a slot with no
+    # price, which the weighted error leaves out and the plain one doesn't. A night slot counts
+    # nowhere. Its price would have moved March's figure.
+    outcomes = pd.DataFrame(
+        {
+            "fold": [date(2025, 3, 1)] * 3 + [date(2025, 4, 1)] * 2,
+            "target_day": [date(2025, 3, 1)] * 3 + [date(2025, 4, 1)] * 2,
+            "error_mw": [200.0, -600.0, 50.0, 400.0, 10000.0],
+            "error_share": [0.01, -0.03, 0.0025, 0.02, 0.5],
+            "is_daylight": [True, True, False, True, True],
+            "price_yen_kwh": [10.0, 30.0, 999.0, 20.0, None],
+            "sky": ["clear"] * 3 + ["cloudy"] * 2,
+            "is_curtailed_day": [False] * 5,
+            "season": ["spring"] * 5,
+        }
+    )
+    per_fold, overall = metrics(outcomes)
+
+    assert per_fold["mae_share"].tolist() == pytest.approx([0.02, 0.26])
+    assert per_fold["mae_share_priced"].tolist() == pytest.approx([0.025, 0.02])
+    assert overall["mae_share_priced"] == pytest.approx((0.1 + 0.9 + 0.4) / 60)
+    assert {"priced_miss", "price"}.isdisjoint(per_fold.columns) and "price" not in overall
+    groups = by_group(outcomes).set_index(["grouping", "group"])
+    assert groups.loc[("sky", "clear"), "mae_share_priced"] == pytest.approx(0.025)
+    assert group_metrics(by_group(outcomes))["sky/cloudy/mae_share_priced"] == pytest.approx(0.02)
+
+    unpriced = outcomes.assign(price_yen_kwh=None)
+    assert "mae_share_priced" not in metrics(unpriced)[1]
+    assert "mae_share_priced" not in metrics(outcomes.drop(columns="price_yen_kwh"))[0]
+
+
+def test_a_run_beside_tepcos_forecast_is_scored_where_both_have_a_miss():
+    # Capacity 20,000 MW. The 16th: the run misses by 0.03 and 0.01, TEPCO by 0.01 and 0.01. The
+    # 17th: one slot, 0.05 against 0.02. Left out: a night slot. The 18th is still under way: its
+    # morning slot has both misses, its afternoon no actuals yet, so the day doesn't count, not
+    # even its morning. The 19th has a slot where only TEPCO has a miss, the run's wind two days
+    # back being unknown: no day of the comparison either.
+    days = [date(2026, 11, 16)] * 3 + [date(2026, 11, 17)]
+    days += [date(2026, 11, 18)] * 2 + [date(2026, 11, 19)]
+    rows = pd.DataFrame(
+        {
+            "target_day": days,
+            "error_mw": [-600.0, 200.0, 5000.0, 1000.0, 8000.0, None, None],
+            "error_share": [-0.03, 0.01, 0.25, 0.05, 0.4, None, None],
+            "tepco_error_mw": [200.0, -200.0, 5000.0, -400.0, 8000.0, None, 1800.0],
+            "tepco_error_share": [0.01, -0.01, 0.25, -0.02, 0.4, None, 0.09],
+            "is_daylight": [True, True, False, True, True, True, True],
+        }
+    )
+    per_day, overall = benchmark(rows)
+
+    assert per_day["target_day"].tolist() == [date(2026, 11, 16), date(2026, 11, 17)]
+    assert per_day["slots"].tolist() == [2, 1]
+    assert per_day["mae_share"].tolist() == pytest.approx([0.02, 0.05])
+    assert per_day["tepco_mae_share"].tolist() == pytest.approx([0.01, 0.02])
+    assert overall == pytest.approx(
+        {
+            "days": 2,
+            "slots": 3,
+            "mae_share": 0.03,
+            "tepco_mae_share": 0.04 / 3,
+            "bias_share": 0.01,
+            "tepco_bias_share": -0.02 / 3,
+            "mae_mw": 600.0,
+            "tepco_mae_mw": 800 / 3,
+        }
+    )
+
+
+def test_a_run_that_shares_no_day_with_tepcos_capture_has_no_comparison():
+    rows = pd.DataFrame(
+        {
+            "target_day": [date(2026, 11, 18)],
+            "error_mw": [None],
+            "error_share": [None],
+            "tepco_error_mw": [None],
+            "tepco_error_share": [None],
+            "is_daylight": [True],
+        }
+    )
+    per_day, overall = benchmark(rows)
+
+    assert per_day.empty and overall == {"days": 0, "slots": 0}
+    assert benchmark(rows.iloc[:0])[1] == {"days": 0, "slots": 0}

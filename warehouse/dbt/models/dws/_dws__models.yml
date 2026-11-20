@@ -37,6 +37,11 @@ models:
     columns:
       - name: solar_d2_mw
         description: Solar output in the same slot on D−2, as known at T; null if nothing was.
+      - name: wind_d2_mw
+        description: >
+          Wind output in the same slot on D−2, as known at T. Not an input to the solar model:
+          the stand-in for wind where a solar forecast is set against TEPCO's forecast of wind and
+          solar together (ads_ml_benchmark_solar).
       - name: solar_mean_7d_mw
         description: >
           The mean of the same slot's solar output over D−8 to D−2, delivered and curtailed added,
@@ -229,7 +234,8 @@ unit_tests:
     description: >
       Slot 12:00: a poisoned version became known one minute after T and stays invisible. Slot
       12:30: a correction known exactly at T is visible (known_at <= T). Slot 13:00: only a version
-      known after T, so nothing. A wind value known before T is not solar.
+      known after T, so nothing. A wind value known before T is not solar: it is the slot's wind
+      two days back, and the two slots with no wind known have none.
     model: dws_solar_features
     given:
       - input: ref('dws_decision_slots')
@@ -255,9 +261,9 @@ unit_tests:
         rows: []
     expect:
       rows:
-        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:00:00+00", solar_d2_mw: 5000}
-        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:30:00+00", solar_d2_mw: 6500}
-        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 04:00:00+00", solar_d2_mw: null}
+        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:00:00+00", solar_d2_mw: 5000, wind_d2_mw: 100}
+        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 03:30:00+00", solar_d2_mw: 6500, wind_d2_mw: null}
+        - {decision_time: "2026-11-16 00:00:00+00", slot_start: "2026-11-17 04:00:00+00", solar_d2_mw: null, wind_d2_mw: null}
 
   - name: the_seven_day_mean_is_the_same_slot_over_d8_to_d2_as_known_at_t
     description: >

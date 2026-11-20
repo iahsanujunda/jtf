@@ -78,6 +78,43 @@ models:
         description: Some slot of the target day was curtailed.
       - name: season
         description: The target day's season.
+      - name: price_yen_kwh
+        description: >
+          The Tokyo spot price of the slot, at its latest version: the weight of the
+          price-weighted error. Empty for a slot not yet traded.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [run_id, model, decision_time, slot_start]
+
+  - name: ads_ml_benchmark_solar
+    description: >
+      Each prediction set beside TEPCO's own forecast for the same slot, wherever TEPCO's was
+      captured: one row per prediction and slot. TEPCO forecasts wind and solar together, so the
+      run's solar forecast has the same slot's wind two days back added, and both are measured
+      against delivered wind plus solar. TEPCO's forecast is made about ten hours later than the
+      run's (notebook 12).
+    columns:
+      - name: forecast_mw
+        description: >
+          The run's solar forecast plus wind two days back, as known at its decision time; null
+          where either is missing.
+      - name: tepco_mw
+        description: TEPCO's forecast of wind and solar, at its latest version.
+        data_tests: [not_null]
+      - name: actual_mw
+        description: Delivered solar plus wind, at their latest versions; null until both are in.
+      - name: error_mw
+        description: forecast_mw minus actual_mw. Positive means the forecast was too high.
+      - name: error_share
+        description: error_mw over capacity_mw, the capacity estimated at the decision time.
+      - name: tepco_error_mw
+        description: tepco_mw minus actual_mw.
+      - name: tepco_error_share
+        description: tepco_error_mw over the same capacity, so the two shares compare.
+      - name: is_daylight
+        description: Not night by dim_daylight. The comparison counts daylight slots only.
+        data_tests: [not_null]
     data_tests:
       - unique_combination:
           arguments:
@@ -112,7 +149,9 @@ unit_tests:
       yet: its row stays, with no label and no error. D was a clear, curtailed autumn day, and
       every one of its rows says so. The slot of the next day has no group yet. Only the first
       prediction has a range, 5,000 to 7,000 MW: the label is inside, and its three forecasts cost
-      50, 250 and 150 MW, a mean of 150 MW, 0.0075 of capacity.
+      50, 250 and 150 MW, a mean of 150 MW, 0.0075 of capacity. The Tokyo price of slot 12:00 was
+      corrected from 11 to 12 yen: the outcome carries the latest, never the system price, and the
+      slots with no price carry none.
     model: ads_ml_outcome_solar
     given:
       - input: source('ads', 'ads_ml_prediction_solar')
@@ -137,12 +176,68 @@ unit_tests:
       - input: ref('ads_ml_day_solar')
         rows:
           - {day: "2026-11-14", sky: clear, is_curtailed: true, season: autumn}
+      - input: ref('dwd_jepx_spot')
+        rows:
+          - {slot_start: "2026-11-14 03:00:00+00", measure: price_tokyo, value_yen_kwh: 11.0, known_at: "2026-11-13 02:00:00+00", known_until: "2026-11-14 02:00:00+00"}
+          - {slot_start: "2026-11-14 03:00:00+00", measure: price_tokyo, value_yen_kwh: 12.0, known_at: "2026-11-14 02:00:00+00", known_until: null}
+          - {slot_start: "2026-11-14 03:00:00+00", measure: price_system, value_yen_kwh: 99.0, known_at: "2026-11-13 02:00:00+00", known_until: null}
     expect:
       rows:
-        - {slot_start: "2026-11-14 03:00:00+00", label_mw: 5500, error_mw: 500, error_share: 0.025, is_daylight: true, in_range: true, pinball_share: 0.0075, sky: clear, is_curtailed_day: true, season: autumn}
-        - {slot_start: "2026-11-13 15:00:00+00", label_mw: 0, error_mw: 0, error_share: 0, is_daylight: false, in_range: null, pinball_share: null, sky: clear, is_curtailed_day: true, season: autumn}
-        - {slot_start: "2026-11-14 03:30:00+00", label_mw: null, error_mw: null, error_share: null, is_daylight: true, in_range: null, pinball_share: null, sky: clear, is_curtailed_day: true, season: autumn}
-        - {slot_start: "2026-11-15 03:00:00+00", label_mw: null, error_mw: null, error_share: null, is_daylight: true, in_range: null, pinball_share: null, sky: null, is_curtailed_day: null, season: null}
+        - {slot_start: "2026-11-14 03:00:00+00", label_mw: 5500, error_mw: 500, error_share: 0.025, is_daylight: true, in_range: true, pinball_share: 0.0075, sky: clear, is_curtailed_day: true, season: autumn, price_yen_kwh: 12.0}
+        - {slot_start: "2026-11-13 15:00:00+00", label_mw: 0, error_mw: 0, error_share: 0, is_daylight: false, in_range: null, pinball_share: null, sky: clear, is_curtailed_day: true, season: autumn, price_yen_kwh: null}
+        - {slot_start: "2026-11-14 03:30:00+00", label_mw: null, error_mw: null, error_share: null, is_daylight: true, in_range: null, pinball_share: null, sky: clear, is_curtailed_day: true, season: autumn, price_yen_kwh: null}
+        - {slot_start: "2026-11-15 03:00:00+00", label_mw: null, error_mw: null, error_share: null, is_daylight: true, in_range: null, pinball_share: null, sky: null, is_curtailed_day: null, season: null, price_yen_kwh: null}
+
+  - name: a_comparison_sets_both_forecasts_against_delivered_wind_and_solar
+    description: >
+      T is 09:00 JST on 2026-11-15, for the 16th. Slot 12:00: the run said 12,000 MW of solar and
+      wind two days back was 200, so its forecast is 12,200; TEPCO's, corrected from 11,000 to
+      12,800 in a later capture, is 12,800; 12,500 of solar and 300 of wind were delivered, with
+      400 curtailed that doesn't count: 12,800. The run is 600 low, 0.03 of 20,000 MW; TEPCO is
+      exact. Slot 12:30 has no actuals yet: it keeps its row with no error. Slot 13:00 was never
+      forecast by TEPCO, and slot 00:00 is night: the first has no row, the second says so.
+    model: ads_ml_benchmark_solar
+    given:
+      - input: source('ads', 'ads_ml_prediction_solar')
+        rows:
+          - {run_id: r1, model: lgbm_quantiles, mode: what-if, decision_time: "2026-11-15 00:00:00+00", target_day: "2026-11-16", slot_start: "2026-11-16 03:00:00+00", predicted_mw: 12000}
+          - {run_id: r1, model: lgbm_quantiles, mode: what-if, decision_time: "2026-11-15 00:00:00+00", target_day: "2026-11-16", slot_start: "2026-11-16 03:30:00+00", predicted_mw: 11500}
+          - {run_id: r1, model: lgbm_quantiles, mode: what-if, decision_time: "2026-11-15 00:00:00+00", target_day: "2026-11-16", slot_start: "2026-11-16 04:00:00+00", predicted_mw: 11000}
+          - {run_id: r1, model: lgbm_quantiles, mode: what-if, decision_time: "2026-11-15 00:00:00+00", target_day: "2026-11-16", slot_start: "2026-11-15 15:00:00+00", predicted_mw: 0}
+      - input: ref('dwd_tepco_forecast_next_day')
+        rows:
+          - {slot_start: "2026-11-16 03:00:00+00", measure: wind_solar, value_mw: 11000, known_at: "2026-11-15 10:00:00+00", known_until: "2026-11-15 13:00:00+00"}
+          - {slot_start: "2026-11-16 03:00:00+00", measure: wind_solar, value_mw: 12800, known_at: "2026-11-15 13:00:00+00", known_until: null}
+          - {slot_start: "2026-11-16 03:00:00+00", measure: demand, value_mw: 32000, known_at: "2026-11-15 10:00:00+00", known_until: null}
+          - {slot_start: "2026-11-16 03:30:00+00", measure: wind_solar, value_mw: 12000, known_at: "2026-11-15 10:00:00+00", known_until: null}
+          - {slot_start: "2026-11-15 15:00:00+00", measure: wind_solar, value_mw: 150, known_at: "2026-11-15 10:00:00+00", known_until: null}
+      - input: ref('dwd_tepco_actuals')
+        rows:
+          - {slot_start: "2026-11-16 03:00:00+00", measure: solar, value_mw: 12500, known_at: "2026-11-16 05:00:00+00", known_until: null}
+          - {slot_start: "2026-11-16 03:00:00+00", measure: wind, value_mw: 250, known_at: "2026-11-16 05:00:00+00", known_until: "2026-11-17 00:00:00+00"}
+          - {slot_start: "2026-11-16 03:00:00+00", measure: wind, value_mw: 300, known_at: "2026-11-17 00:00:00+00", known_until: null}
+          - {slot_start: "2026-11-16 03:00:00+00", measure: solar_curtailed, value_mw: 400, known_at: "2026-11-16 05:00:00+00", known_until: null}
+          - {slot_start: "2026-11-15 15:00:00+00", measure: solar, value_mw: 0, known_at: "2026-11-15 17:00:00+00", known_until: null}
+          - {slot_start: "2026-11-15 15:00:00+00", measure: wind, value_mw: 180, known_at: "2026-11-15 17:00:00+00", known_until: null}
+      - input: ref('dws_solar_features')
+        rows:
+          - {decision_time: "2026-11-15 00:00:00+00", slot_start: "2026-11-16 03:00:00+00", wind_d2_mw: 200}
+          - {decision_time: "2026-11-15 00:00:00+00", slot_start: "2026-11-16 03:30:00+00", wind_d2_mw: 210}
+          - {decision_time: "2026-11-15 00:00:00+00", slot_start: "2026-11-15 15:00:00+00", wind_d2_mw: 160}
+          - {decision_time: "2026-11-14 00:00:00+00", slot_start: "2026-11-16 03:00:00+00", wind_d2_mw: 9999}
+      - input: ref('dws_capacity')
+        rows:
+          - {decision_time: "2026-11-15 00:00:00+00", capacity_mw: 20000}
+      - input: ref('dim_daylight')
+        rows:
+          - {slot_start: "2026-11-16 03:00:00+00", is_night: false}
+          - {slot_start: "2026-11-16 03:30:00+00", is_night: false}
+          - {slot_start: "2026-11-15 15:00:00+00", is_night: true}
+    expect:
+      rows:
+        - {slot_start: "2026-11-16 03:00:00+00", forecast_mw: 12200, tepco_mw: 12800, actual_mw: 12800, error_mw: -600, error_share: -0.03, tepco_error_mw: 0, tepco_error_share: 0, is_daylight: true}
+        - {slot_start: "2026-11-16 03:30:00+00", forecast_mw: 11710, tepco_mw: 12000, actual_mw: null, error_mw: null, error_share: null, tepco_error_mw: null, tepco_error_share: null, is_daylight: true}
+        - {slot_start: "2026-11-15 15:00:00+00", forecast_mw: 160, tepco_mw: 150, actual_mw: 180, error_mw: -20, error_share: -0.001, tepco_error_mw: -30, tepco_error_share: -0.0015, is_daylight: false}
 
   # ads_ml_day_solar. 31 whole days of January 2026 and one partial, 48 slots each, capacity
   # 10,000 MW. Slots 20 to 27 are lit (clear sky 1,000 MW); slot 10 has 100 MW of clear sky, too

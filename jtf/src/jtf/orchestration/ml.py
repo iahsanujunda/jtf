@@ -7,6 +7,9 @@
 2. `ads/ads_ml_outcome_solar`: a dbt model, each prediction met by its label
 3. `ml/solar_backtest_metrics`: a backtest's outcome aggregated per fold and per kind of day,
    logged to MLflow
+4. `ads/ads_ml_benchmark_solar`: a dbt model, each prediction beside TEPCO's own forecast where
+   one was captured, and `ml/solar_benchmark_metrics`: the two sides' misses over the days they
+   share, logged to MLflow
 
 So the lineage runs from raw files through DWS to the metrics. Folds, the models, runs and the
 metrics are functions in jtf.ml; these assets only wire them to BigQuery and MLflow.
@@ -20,6 +23,7 @@ import pandas as pd
 from jtf.ml.backtest import (
     FIRST_TEST_MONTH,
     PERSISTENCE,
+    benchmark,
     by_group,
     fold_months,
     last_complete_month,
@@ -27,11 +31,19 @@ from jtf.ml.backtest import (
     month,
 )
 from jtf.ml.replay import Mismatch, Refused, reproduce, run, target_day
-from jtf.ml.tracking import FINGERPRINTS, links, log_backtest, log_trainings, run_code
+from jtf.ml.tracking import (
+    FINGERPRINTS,
+    links,
+    log_backtest,
+    log_benchmark,
+    log_trainings,
+    run_code,
+)
 from jtf.orchestration.resources import Datasets
 
 PREDICTIONS = dg.AssetKey(["ads", "ads_ml_prediction_solar"])
 OUTCOMES = dg.AssetKey(["ads", "ads_ml_outcome_solar"])
+BESIDE_TEPCO = dg.AssetKey(["ads", "ads_ml_benchmark_solar"])
 
 
 class RunConfig(dg.Config):
@@ -182,19 +194,52 @@ def solar_backtest_metrics(
     )
 
 
-ML_ASSETS = [solar_predictions, solar_backtest_metrics]
+@dg.asset(
+    key=dg.AssetKey(["ml", "solar_benchmark_metrics"]),
+    deps=[BESIDE_TEPCO],
+    group_name="ml",
+    kinds={"python", "mlflow"},
+    description="The newest run beside TEPCO's own forecast, over the days they share",
+)
+def solar_benchmark_metrics(
+    context: dg.AssetExecutionContext, datasets: Datasets
+) -> dg.MaterializeResult:
+    event = context.instance.get_latest_materialization_event(PREDICTIONS)
+    if event is None or event.asset_materialization is None:
+        raise dg.Failure("no predictions yet: materialize ads/ads_ml_prediction_solar first")
+    run = {k: v.value for k, v in event.asset_materialization.metadata.items()}
+    per_day, overall = benchmark(datasets.backtest().benchmark(run["run_id"]))
+    if not overall["days"]:  # TEPCO's forecast is captured since November 2026 only
+        context.log.info(f"run {run['run_id']} shares no day with TEPCO's captured forecasts")
+        return dg.MaterializeResult(metadata={"run_id": run["run_id"], **overall})
+    mlflow_run_id, link = log_benchmark(run=run, per_day=per_day, overall=overall)
+    context.log.info(f"{run['model']} beside TEPCO: {overall}")
+    return dg.MaterializeResult(
+        metadata={
+            "run_id": run["run_id"],
+            "mlflow_run_id": mlflow_run_id,
+            "in_mlflow": dg.MetadataValue.url(link),
+            **overall,
+        }
+    )
+
+
+ML_ASSETS = [solar_predictions, solar_backtest_metrics, solar_benchmark_metrics]
 
 # Launched by name with their config: a replay (a what-if or a reproduce) and a backtest, scored
 METRICS = dg.AssetKey(["ml", "solar_backtest_metrics"])
+BESIDE_TEPCO_METRICS = dg.AssetKey(["ml", "solar_benchmark_metrics"])
 REPLAY = dg.define_asset_job(
     "replay",
-    selection=dg.AssetSelection.assets(PREDICTIONS, OUTCOMES),
+    selection=dg.AssetSelection.assets(PREDICTIONS, OUTCOMES, BESIDE_TEPCO, BESIDE_TEPCO_METRICS),
     description="A what-if run over target days, or a reproduce of an earlier run",
     config={"ops": {solar_predictions.op.name: {"config": {"mode": "what-if"}}}},
 )
 BACKTEST = dg.define_asset_job(
     "backtest",
-    selection=dg.AssetSelection.assets(PREDICTIONS, OUTCOMES, METRICS),
+    selection=dg.AssetSelection.assets(
+        PREDICTIONS, OUTCOMES, METRICS, BESIDE_TEPCO, BESIDE_TEPCO_METRICS
+    ),
     description="The rolling backtest over test months, its metrics logged to MLflow",
 )
 ML_JOBS = [REPLAY, BACKTEST]

@@ -16,6 +16,18 @@ sources:
         description: >
           TEPCO's monthly area actuals, one row per slot per capture, in MW averaged over the
           slot, labelled by the slot's start (`date` as 2026/11/1, `time` as 0:00).
+      - name: tepco_area_forecast_next_day
+        description: >
+          TEPCO's forecast for tomorrow for its area (`AREA_ONCE_YOSOKU.csv`), one row per slot
+          per capture: demand, generation, and wind plus solar, in kWh per half hour, with the
+          slot's code (1 to 48) and its start as `0000`. Captured at 19:00 and 22:00; TEPCO keeps
+          no archive of it.
+      - name: jepx_spot
+        description: >
+          JEPX's spot summary, one row per delivery slot per capture: the system price and each
+          area's price in yen per kWh, `delivery_date` as 2026/11/21 and the slot's code (1 to
+          48). The current fiscal year's file is captured daily at 11:00; earlier years came with
+          the initial load.
       - name: meti_fit_notices
         description: >
           Each announcement of a FIT/FIP capacity release, as one stored copy of METI's summary
