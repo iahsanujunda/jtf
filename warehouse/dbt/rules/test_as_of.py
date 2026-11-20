@@ -101,6 +101,11 @@ CASES = {
     "the predicate on the spine's alias": (JOINED.replace("v.known", "d.known"), False),
     "half: no known_until": (JOINED.replace(AS_OF, "v.known_at <= d.decision_time"), False),
     "< instead of <=": (JOINED.replace("v.known_at <=", "v.known_at <"), False),
+    # The leak of fault scenario F2 (docs/scenarios): right for a label, a leak in a feature
+    "the latest version, as a label is read": (
+        JOINED.replace(AS_OF, "v.known_until is null"),
+        False,
+    ),
     "T is the clock": (JOINED.replace("d.decision_time", "current_timestamp()"), False),
     "T is a literal": (JOINED.replace("d.decision_time", "timestamp '2026-11-18'"), False),
     "two different Ts": (JOINED.replace("d.decision_time < v", "e.decision_time < v"), False),

@@ -258,11 +258,11 @@ They run on that world, five target days of real raw files across the seam at ca
 
 ## Fault scenarios
 
-Run-config presets on the replay job (`fault=F1`, `mode=what-if`), launched from the Dagster UI.
+Run-config presets on the replay job (`fault=F1`, `mode=what-if`), launched from the Dagster UI. F2 is the exception: its leaks are built by a notebook's own queries and scored with the pipeline's code ([notebook 13](../../notebooks/13_what_a_leak_looks_like.ipynb)), so that no switch for a leak exists in the pipeline's SQL (agreed 2026-11-20).
 
 | ID | Injection | Should be caught by | Handling | Write-up shows |
 | --- | --- | --- | --- | --- |
-| F2 lookahead leak | Two variants: weather from `previous_day0`/`previous_day1` instead of `previous_day2`; and lags read D−1 actuals by bypassing `as_of` | The SQL rule in CI for the bypass; the future-poison test; the gap between leaky and as-of backtests | Block the merge | How much better the leaky backtest looked, per variant and segment |
+| F2 lookahead leak | Two variants: weather from `previous_day0`/`previous_day1` instead of `previous_day2`; and lags read D−1 actuals by bypassing `as_of` | The SQL rule in CI for the bypass; the future-poison test. Not the gap between leaky and as-of backtests: the lag leak moved the model's score by 0.03 points though one value in nine it read was from the future ([write-up](../scenarios/F2-lookahead-leak.md)) | Block the merge | How much better the leaky backtest looked, per variant and segment: 2.95% of capacity for 5.21% with the same day's weather |
 | F1 late weather | Drop the live run at `T` (and, in replay, the latest qualifying run) | The freshness check on `openmeteo_live` | Fallback ladder level 1, forecast flagged degraded, ranges widened | Accuracy and coverage cost of level 1 and level 2 over the backtest period |
 
 Each write-up uses the [template](../scenarios/README.md), with the expected outcome written before the run.
