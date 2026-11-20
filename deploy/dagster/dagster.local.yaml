@@ -1,0 +1,22 @@
+# Dagster's own settings where it runs today, on a laptop, with its state in .dagster/.
+# `make dagster` copies this file there as dagster.yaml before starting, so it travels with the code.
+
+# The automation sensor ticks every 30 seconds and stores what it evaluated each time: 2.6 GB in
+# six days with nothing purged. A tick that requested nothing is kept a day, enough to see why a
+# rebuild did not happen this morning; one that did something, or failed, a month.
+retention:
+  sensor:
+    purge_after_days:
+      skipped: 1
+      success: 30
+      failure: 30
+  auto_materialize:
+    purge_after_days:
+      skipped: 1
+      success: 30
+      failure: 30
+  schedule:
+    purge_after_days:
+      skipped: 1
+      success: 30
+      failure: 30

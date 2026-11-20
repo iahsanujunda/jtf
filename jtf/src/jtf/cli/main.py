@@ -100,9 +100,11 @@ def parse(
     ] = None,
 ) -> None:
     """Parse raw files into the source's ODS tables; files already loaded are skipped."""
+    import os
     import uuid
     from datetime import UTC, date, datetime, timedelta
 
+    from jtf.orchestration.update import Git, Refused, may_write
     from jtf.parse import parsers_for
     from jtf.parse.bigquery import BigQueryWarehouse
     from jtf.parse.load import parse_day
@@ -110,6 +112,11 @@ def parse(
 
     if not raw_url or not bigquery_project:
         raise typer.BadParameter("Set --raw-url and --bigquery-project, or their JTF_ variables.")
+    try:
+        may_write(Git(Path.cwd()), os.environ)
+    except Refused as e:
+        typer.echo(f"nothing parsed: {e}", err=True)
+        raise typer.Exit(code=1) from e
     parsers = [p for p in parsers_for(source) if table in (None, p.table)]
     if not parsers:
         raise typer.BadParameter(f"{source} has no table {table!r}.")
@@ -194,16 +201,92 @@ def dagster_update(
 ) -> None:
     """Pull main into Dagster's checkout and reload it, with no run in between: stop the sensors,
     wait for running runs, pull, reload, start the sensors again."""
+    import subprocess
+
     from jtf.orchestration.update import Dagster, Git, Refused, update
 
+    def prepare() -> None:
+        """The new code's own `jtf warehouse ensure`, in a process that has loaded it."""
+        subprocess.run(["uv", "run", "jtf", "warehouse", "ensure"], cwd=repo.resolve(), check=True)
+
     try:
-        typer.echo(update(Git(repo.resolve()), Dagster(url), timeout=timeout, echo=typer.echo))
+        typer.echo(
+            update(
+                Git(repo.resolve()),
+                Dagster(url),
+                prepare=prepare,
+                timeout=timeout,
+                echo=typer.echo,
+            )
+        )
     except Refused as e:
         typer.echo(f"nothing pulled: {e}", err=True)
         raise typer.Exit(code=1) from e
     except RuntimeError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
+
+
+@dagster.command("ready")
+def dagster_ready(
+    repo: Annotated[Path, typer.Option(help="The checkout Dagster runs from.")] = Path("."),
+) -> None:
+    """What `make dagster` does before Dagster starts: refuse to start against prod from anything
+    but a clean checkout of main, and put Dagster's own settings where it reads them."""
+    import os
+
+    from jtf.orchestration.update import Git, Refused, may_write, write_instance_settings
+
+    try:
+        may_write(Git(repo.resolve()), os.environ)
+    except Refused as e:
+        typer.echo(f"Dagster not started: {e}", err=True)
+        raise typer.Exit(code=1) from e
+    if write_instance_settings(repo.resolve()):
+        typer.echo("wrote .dagster/dagster.yaml from deploy/dagster/dagster.local.yaml")
+
+
+warehouse = typer.Typer(
+    help="The warehouse: who may write it, and the tables Python writes.", no_args_is_help=True
+)
+app.add_typer(warehouse, name="warehouse")
+
+
+@warehouse.command("guard")
+def warehouse_guard(
+    repo: Annotated[Path, typer.Option(help="The checkout about to write.")] = Path("."),
+) -> None:
+    """Refuse unless this checkout may write the warehouse its settings name: prod's tables only
+    from a clean checkout of main. What `make dbt` asks before it builds."""
+    import os
+
+    from jtf.orchestration.update import Git, Refused, may_write
+
+    try:
+        may_write(Git(repo.resolve()), os.environ)
+    except Refused as e:
+        typer.echo(f"nothing built: {e}", err=True)
+        raise typer.Exit(code=1) from e
+
+
+@warehouse.command("ensure")
+def warehouse_ensure(
+    project: Project,
+    location: Location,
+    prefix: Annotated[
+        str, typer.Option(envvar="JTF_DBT_DATASET_PREFIX", help="dbt's prefix: <prefix>_ads.")
+    ],
+) -> None:
+    """Make the predictions and runs tables as the code has them, or add the columns they lack."""
+    from google.cloud import bigquery
+
+    from jtf.ml.warehouse import ensure_tables
+
+    client = bigquery.Client(project=project, location=location)
+    done = ensure_tables(client, project, location, prefix)
+    typer.echo(
+        "; ".join(done) if done else "the predictions and runs tables are as the code has them"
+    )
 
 
 ods = typer.Typer(

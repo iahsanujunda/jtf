@@ -8,7 +8,9 @@ The standard for everyone who changes this repository, people and agents alike: 
 ## Where you work
 
 - **In a git worktree, on a branch.** The main checkout is Dagster's deployment: Dagster reads its asset graph at a reload but dbt's SQL at every run, so any change to that tree without a reload runs new SQL on the old graph. Bring it up to `main` only with `make dagster-update` (below)
-- **Against the dev project:** dev BigQuery (`ods` and dbt's `dev_*` datasets), and the prod raw bucket, read-only. Settings live in the main checkout's `.env`, gitignored, with their names in [settings.example.env](../deploy/contract/settings.example.env); nothing account-specific goes in code. `make dbt` and `make rules` read that `.env` from any worktree
+- **With settings of your own** (new)**.** Two gitignored files in the main checkout, their names in [settings.example.env](../deploy/contract/settings.example.env); nothing account-specific goes in code. `.env` is the main checkout's: Dagster on `main`, writing the warehouse that is kept. `.env.dev` is every worktree's: the dev project and a dataset prefix of your own, with the raw bucket and the kept warehouse read-only. `make` reads `.env.dev` from a worktree (`.env` until it exists), and the file wins over anything the shell already exports; `make where` says where a build would land
+- **The kept warehouse is written only by code that went through a pull request** (new)**:** where the settings say `JTF_ENV=prod`, `make dagster`, `make dbt` and `jtf parse` refuse anything but a checkout of `main` with nothing uncommitted. Nothing is rebuilt or backfilled there from a branch
+- **Dagster need not run all the time** (new)**:** the captures run without it. Started after days off, it parses every day with unparsed files, up to six weeks back, and the models rebuild from there
 - **One Dagster at a time, and no `jtf parse` while it runs:** a parse appends without a lock, so two would load the same file twice
 
 ## A new source (settled)
@@ -30,6 +32,7 @@ Read the plan's paragraph for the layer first: units and names come from the pla
 - **DWD** ([dwd](../warehouse/dbt/models/dwd/README.md)): power in MW, slots by their start in JST, every version with `known_at`, `known_until` and `basis`. `known_at` is proven by unit tests: a late backfill, capture start, the same value seen again, a correction, a re-parse. It is also checked on real data after every load: a `rule` version before its source's capture start, and never dated after the fetch that first held it; a `captured` version never known before the fetch that held it; no `known_at` after the sources' newest fetch
 - **DWS** ([dws](../warehouse/dbt/models/dws/README.md)): versioned DWD only through `as_of`, DIM directly. A feature earns its place in a notebook first (from 08 on, reading the models through `as_of`); then its logic lives only in dbt, never in pandas. Features are append-only: changing what one means adds a column
 - **Any model:** a sum that is compared or versioned is exact (`NUMERIC`, or terms in a fixed order). An incremental model equals a full build, row for row, and its cost is read from BigQuery's job history. Every BigQuery call names the project
+- **Try it before the pull request** (new)**:** `make sql MODEL=<model>` prints the model as it will run, every table name and variable resolved. `make try MODELS="<model> <model>"` builds and tests the changed models on real data in datasets of your own, reading every other model from the kept warehouse; it refuses when your settings write where main does
 - **The rules** ([rules](../warehouse/dbt/rules/README.md)): layers read only downward, DWS reads versioned DWD through `as_of`, and nothing reads the clock. `make test` runs what needs no BigQuery, `make rules` runs all of them, and CI runs them on every pull request that touches the warehouse
 
 ## Models and ADS (not yet)
@@ -45,12 +48,12 @@ Labels and outcomes are dbt models and predictions are appended by `jtf.ml` unde
 ## Release (new)
 
 1. **A pull request:** `main` takes changes only through one. Its title and description name things by what they are, never by our labels for them (F6, step 5): a reader shouldn't have to open another document to know what changed and why. CI runs the `jtf` job (ruff, unit tests, Dagster's definitions) and, for the warehouse, the `warehouse` job (unit tests, an empty build and the rules, in datasets of its own that read no real data), and the `e2e` job (the time machine's guarantees on a world of real raw files, [e2e_tests](../e2e_tests/README.md)) ([workflows](../.github/workflows/README.md))
-2. **After the merge, in the main checkout: `make dagster-update`.** It stops the sensors, waits for running runs, pulls, reloads the code location and starts the sensors again. With nothing to pull it still reloads, so run it too after a pull by hand: Dagster keeps running the code it loaded until a reload. If dependencies changed it refuses: stop `make dagster`, then `git pull`, `make setup` and `make dagster`
+2. **After the merge, in the main checkout: `make dagster-update`.** It stops the sensors, waits for running runs, pulls, makes the tables Python writes as the new code has them (`jtf warehouse ensure`: a table or a column is never added by hand), reloads the code location and starts the sensors again. With nothing to pull it still reloads, so run it too after a pull by hand: Dagster keeps running the code it loaded until a reload. If dependencies changed it refuses: stop `make dagster`, then `git pull`, `make setup` and `make dagster`
 3. **Check after, in the data:**
    - A changed model rebuilds only when one of its inputs updates, so materialize it and what reads it in the UI (not a run's assets, `ads/ads_ml_prediction_solar` and `ml/solar_backtest_metrics`: materializing them makes a model run, not a rebuild), then look at its rows, not only its checks: a table that is consistently behind passes every check of it agreeing with itself
    - A new asset or check shows in the UI
    - A change to the daily chain is confirmed by the next morning's run: captures at 08:45, one ODS run, one run of the models, every check green
-4. **Prod Dagster, backfills after a release, rollback** (not yet): step 4. The PRD's [development and release workflow](prd.md#development-and-release-workflow) holds the target
+4. **Dagster in prod, backfills after a release, rollback** (not yet): Dagster runs on one laptop in this phase. The PRD's [development and release workflow](prd.md#development-and-release-workflow) holds the target
 
 ## When something fails (settled)
 

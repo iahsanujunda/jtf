@@ -3,9 +3,13 @@
 Materialising day D parses every file of D not yet loaded at the parser's version, so a re-run
 adds nothing. The parser's version is the asset's code version: changing a parser marks every
 partition out of date, and the backfill appends rows under the new version.
+
+Dagster is not always on: it is started a few times a week and catches up (plan, Decisions). The
+sensor then records every day's files that landed meanwhile, and each of those days is parsed, not
+only the newest. Nothing is lost by the wait: a value is dated by its fetch, never by its parse.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import dagster as dg
 
@@ -25,6 +29,17 @@ ROWS_AS_LOADED = "rows_as_loaded"
 MANIFEST_KEY = dg.AssetKey(["ods", MANIFEST])
 
 
+# How far back a day with newly recorded files is still parsed on its own. Dagster's eager() acts
+# on the newest day only, which leaves every day missed while Dagster was off recorded and
+# unparsed. Six weeks covers a long absence; older days are a backfill by hand, on purpose
+CATCH_UP = timedelta(days=42)
+PARSE_WHEN_LANDED = (
+    dg.AutomationCondition.eager()
+    .replace("in_latest_time_window", dg.AutomationCondition.in_latest_time_window(CATCH_UP))
+    .with_label("parse_when_landed")
+)
+
+
 def ods_key(parser: Parser) -> dg.AssetKey:
     return dg.AssetKey(["ods", parser.table])
 
@@ -37,7 +52,7 @@ def ods_asset(parser: Parser) -> dg.AssetsDefinition:
         deps=[raw_key(parser.source)],
         partitions_def=EXTRACTION_DAYS,
         code_version=parser.version,
-        automation_condition=dg.AutomationCondition.eager(),
+        automation_condition=PARSE_WHEN_LANDED,
         group_name="ods",
         kinds={"bigquery"},
         description=f"Rows of {parser.source}'s raw files, with lineage; one row per data row",
