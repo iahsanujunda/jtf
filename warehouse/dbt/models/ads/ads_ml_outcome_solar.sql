@@ -25,6 +25,7 @@ select
     p.predicted_mw,
     p.p10_mw,
     p.p90_mw,
+    p.level,
     l.label_mw,
     p.predicted_mw - l.label_mw as error_mw,
     c.capacity_mw,

@@ -7,9 +7,27 @@ from datetime import UTC, date, datetime, timedelta
 import pandas as pd
 import pytest
 
-from jtf.ml.backtest import BOOSTED, MEAN_7D, MEAN_7D_RANGE, QUANTILES
+from jtf.ml.backtest import (
+    BOOSTED,
+    FALLBACK,
+    MEAN_7D,
+    MEAN_7D_RANGE,
+    MEAN_7D_SCALED,
+    NORMAL,
+    PERSISTENCE,
+    QUANTILES,
+)
 from jtf.ml.models import KEPT_INPUTS, columns_of, half_hour, scaled_mean, train_miss_by_hour
-from jtf.ml.replay import MODELS, Mismatch, Model, Refused, reproduce, run, training_cutoff
+from jtf.ml.replay import (
+    DAYS_WEATHER,
+    MODELS,
+    Mismatch,
+    Model,
+    Refused,
+    reproduce,
+    run,
+    training_cutoff,
+)
 from jtf.ml.warehouse import KEY_COLUMNS, OUTPUT_COLUMNS
 from test_boosted import world as lit_world
 
@@ -286,3 +304,110 @@ def test_the_scaled_mean_follows_the_forecast_only_where_a_ratio_means_something
     assert scaled_mean(features).tolist() == [7500.0, 2500.0, 300.0, 5000.0, 5000.0, 5000.0]
     assert MODELS["mean_7d_scaled"].inputs == ("actuals_7d", "weather", "capacity")
     assert set(features.columns) == set(MODELS["mean_7d_scaled"].features)
+
+
+MARCH = {"first": date(2025, 3, 1), "last": date(2025, 3, 31)}
+
+
+def lit_warehouse() -> FakeWarehouse:
+    """The boosted model's world, with a day of D−2 output so that persistence can run in it."""
+    lit = lit_world()
+    return FakeWarehouse(lit.assign(fold=[d.replace(day=1) for d in lit["target_day"]]))
+
+
+def forecasts(warehouse: FakeWarehouse, run_id: str) -> pd.DataFrame:
+    rows = pd.concat(warehouse.predictions)
+    return rows[rows["run_id"] == run_id].set_index("slot_start")
+
+
+def test_the_days_weather_is_what_the_morning_capture_brings_and_not_the_weeks():
+    assert set(DAYS_WEATHER) == {
+        "forecast_ghi_w_m2",
+        "forecast_direct_w_m2",
+        "forecast_diffuse_w_m2",
+        "forecast_cloud_cover_pct",
+        "forecast_temperature_c",
+    }
+    assert MODELS[BOOSTED].weather == DAYS_WEATHER and MODELS[BOOSTED].fallback == MEAN_7D_RANGE
+    assert MODELS[MEAN_7D_SCALED].fallback == MEAN_7D and not MODELS[PERSISTENCE].weather
+
+
+def test_a_day_whose_weather_is_late_is_answered_whole_by_the_fallback_and_says_so():
+    warehouse = lit_warehouse()
+    rows = warehouse.rows
+    # The 10th: one daylight slot lacks one variable. The 20th: only a night slot does
+    noon = (rows["target_day"] == date(2025, 3, 10)) & rows["is_daylight"]
+    rows.loc[noon[noon].index[5], "forecast_cloud_cover_pct"] = None
+    night = (rows["target_day"] == date(2025, 3, 20)) & ~rows["is_daylight"]
+    rows.loc[night[night].index[0], "forecast_ghi_w_m2"] = None
+
+    record = a_run(warehouse, "r1", model=BOOSTED, **MARCH)
+    a_run(warehouse, "fallback", model=MEAN_7D_RANGE, **MARCH)
+
+    said, fallback = forecasts(warehouse, "r1"), forecasts(warehouse, "fallback")
+    tenth = said["target_day"] == date(2025, 3, 10)
+    assert said.loc[tenth, "level"].eq(FALLBACK).all() and tenth.sum() == 48
+    assert said.loc[~tenth, "level"].eq(NORMAL).all()
+    pd.testing.assert_frame_equal(said.loc[tenth, QUANTILES], fallback.loc[tenth, QUANTILES])
+    other = said["target_day"] == date(2025, 3, 11)
+    assert not said.loc[other, "predicted_mw"].equals(fallback.loc[other, "predicted_mw"])
+    assert record["degraded"] == 1 and record["decision_times"] == 31
+    assert fallback["level"].eq(NORMAL).all()  # run as itself, the fallback is no fallback
+
+
+def test_the_late_weather_fault_degrades_every_day_to_the_fallbacks_own_forecasts():
+    warehouse = lit_warehouse()
+
+    record = a_run(warehouse, "r1", model=BOOSTED, fault="F1", **MARCH)
+    honest = a_run(warehouse, "r2", model=BOOSTED, **MARCH)
+    a_run(warehouse, "fallback", model=MEAN_7D_RANGE, **MARCH)
+
+    said, fallback = forecasts(warehouse, "r1"), forecasts(warehouse, "fallback")
+    assert said["level"].eq(FALLBACK).all() and record["fault"] == "F1"
+    assert record["degraded"] == record["decision_times"] == 31
+    pd.testing.assert_frame_equal(said[QUANTILES], fallback[QUANTILES])
+    assert (honest["fault"], honest["degraded"]) == (None, 0)
+    assert forecasts(warehouse, "r2")["level"].eq(NORMAL).all()
+    # The fault is in what the run read, not in the warehouse: both saw the same features there
+    assert record["inputs_fingerprint"] == honest["inputs_fingerprint"]
+    assert record["outputs_fingerprint"] != honest["outputs_fingerprint"]
+
+
+def test_a_reproduce_of_a_faulted_run_carries_its_fault_and_matches():
+    warehouse = lit_warehouse()
+    a_run(warehouse, "r1", model=BOOSTED, fault="F1", **MARCH)
+
+    again = reproduce(warehouse, run_id="r2", original="r1", code=CODE, now=NOW)
+
+    assert again["fault"] == "F1" and again["degraded"] == 31
+    assert forecasts(warehouse, "r2")["level"].eq(FALLBACK).all()
+
+
+def test_a_rule_that_reads_the_weather_falls_back_too_and_one_that_doesnt_never_does():
+    warehouse = lit_warehouse()
+
+    scaled = a_run(warehouse, "r1", model=MEAN_7D_SCALED, fault="F1", **MARCH)
+    plain = a_run(warehouse, "r2", model=PERSISTENCE, fault="F1", **MARCH)
+    a_run(warehouse, "mean", model=MEAN_7D, **MARCH)
+
+    said = forecasts(warehouse, "r1")
+    assert said["level"].eq(FALLBACK).all() and scaled["degraded"] == 31
+    assert said["predicted_mw"].equals(forecasts(warehouse, "mean")["predicted_mw"])
+    assert forecasts(warehouse, "r2")["level"].eq(NORMAL).all() and plain["degraded"] == 0
+
+
+def test_a_model_with_no_fallback_refuses_a_day_without_its_weather(monkeypatch):
+    warehouse = lit_warehouse()
+    alone = Model(
+        BOOSTED,
+        "1",
+        columns_of(KEPT_INPUTS),
+        ("weather",),
+        train=MODELS[BOOSTED].train,
+        weather=DAYS_WEATHER,
+    )
+    monkeypatch.setitem(MODELS, BOOSTED, alone)
+
+    with pytest.raises(Refused, match="no fallback"):
+        a_run(warehouse, "r1", model=BOOSTED, fault="F1", **MARCH)
+    assert not warehouse.predictions and not warehouse.runs

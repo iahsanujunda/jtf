@@ -144,10 +144,10 @@ def test_the_target_day_is_the_day_after_the_decision_time_in_jst():
     [
         ({"mode": "replay"}, "mode"),
         ({"model": "m1"}, "no model"),
-        ({"fault": "F1"}, "fault"),
+        ({"fault": "F9"}, "no fault 'F9'"),
         ({"first_day": date(2026, 12, 1), "last_day": date(2026, 12, 2)}, "no features"),
     ],
-    ids=["unknown mode", "unknown model", "a fault before step 8", "no features"],
+    ids=["unknown mode", "unknown model", "a fault that doesn't exist", "no features"],
 )
 def test_a_run_is_refused_before_it_writes_anything(warehouse, asked, why):
     with pytest.raises(Refused, match=why):

@@ -23,6 +23,7 @@ OUTPUT_COLUMNS = [
     "predicted_mw",
     "p10_mw",
     "p90_mw",
+    "level",
 ]
 
 PREDICTION_SCHEMA = [
@@ -36,6 +37,7 @@ PREDICTION_SCHEMA = [
     bigquery.SchemaField("predicted_mw", "FLOAT", mode="NULLABLE"),
     bigquery.SchemaField("p10_mw", "FLOAT", mode="NULLABLE"),
     bigquery.SchemaField("p90_mw", "FLOAT", mode="NULLABLE"),
+    bigquery.SchemaField("level", "INTEGER", mode="NULLABLE"),
 ]
 # A table made before a column was added gains it at the next append
 GROWS = [bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION]
@@ -56,6 +58,7 @@ RUN_SCHEMA = [
     bigquery.SchemaField("exact", "INTEGER", mode="REQUIRED"),
     bigquery.SchemaField("approximate", "INTEGER", mode="REQUIRED"),
     bigquery.SchemaField("fault", "STRING"),
+    bigquery.SchemaField("degraded", "INTEGER"),
     bigquery.SchemaField("inputs_fingerprint", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("outputs_fingerprint", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("training_fingerprint", "STRING"),
