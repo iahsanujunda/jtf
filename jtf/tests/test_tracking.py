@@ -190,3 +190,66 @@ def test_a_run_in_dagster_shows_what_it_was_made_from_and_links_to_its_entries(s
         "training/rows.parquet",
         "training/set.json",
     ]
+
+
+class BesideTepco(FakeWarehouse):
+    """A warehouse whose comparison table holds what the test puts there."""
+
+    compared = pd.DataFrame(
+        columns=[
+            "target_day",
+            "error_mw",
+            "error_share",
+            "tepco_error_mw",
+            "tepco_error_share",
+            "is_daylight",
+        ]
+    )
+
+    def benchmark(self, run_id):
+        return self.compared
+
+
+def test_a_run_beside_tepco_is_logged_with_its_days_and_shown_in_dagster(store, monkeypatch):
+    global WAREHOUSE
+    WAREHOUSE = BesideTepco(world())
+    monkeypatch.setattr(ml, "run_code", lambda: CODE | {"git_url": PUBLISHED})
+    config = {"model": MEAN_7D_RANGE, "first_test_month": "2026-02", "last_test_month": "2026-03"}
+    instance = dg.DagsterInstance.ephemeral()
+    resources = {"datasets": StandIn(project="p", location="l", prefix="x")}
+    dg.materialize(
+        [ml.solar_predictions],
+        resources=resources,
+        run_config={"ops": {ml.solar_predictions.op.name: {"config": config}}},
+        instance=instance,
+    )
+
+    # No day shared with TEPCO's capture: nothing to log, and the asset says so
+    nothing = dg.materialize([ml.solar_benchmark_metrics], resources=resources, instance=instance)
+    (event,) = nothing.get_asset_materialization_events()
+    shown = {k: v.value for k, v in event.materialization.metadata.items()}
+    assert (shown["days"], shown["slots"]) == (0, 0) and "mlflow_run_id" not in shown
+    assert store.get_experiment_by_name(tracking.BENCHMARK) is None
+
+    BesideTepco.compared = pd.DataFrame(
+        {
+            "target_day": [date(2026, 3, 1), date(2026, 3, 2)],
+            "error_mw": [-600.0, 1000.0],
+            "error_share": [-0.03, 0.05],
+            "tepco_error_mw": [200.0, -400.0],
+            "tepco_error_share": [0.01, -0.02],
+            "is_daylight": [True, True],
+        }
+    )
+    result = dg.materialize([ml.solar_benchmark_metrics], resources=resources, instance=instance)
+
+    (event,) = result.get_asset_materialization_events()
+    shown = {k: v.value for k, v in event.materialization.metadata.items()}
+    assert (shown["days"], shown["slots"]) == (2, 2)
+    assert (shown["mae_share"], shown["tepco_mae_share"]) == pytest.approx((0.04, 0.015))
+    entry = store.get_run(shown["mlflow_run_id"])
+    assert shown["in_mlflow"].endswith(f"/runs/{entry.info.run_id}")
+    assert entry.data.metrics["days"] == 2 and entry.data.metrics["tepco_mae_share"] == 0.015
+    assert entry.data.tags["mode"] == "backtest" and entry.data.tags["git_commit"] == "abc123"
+    assert entry.data.params["first_target_day"] == "2026-03-01"
+    assert files(store, entry.info.run_id) == ["days.csv"]

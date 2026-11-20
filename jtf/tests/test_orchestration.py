@@ -10,6 +10,8 @@ from jtf.orchestration.dbt import DBT_PROJECT, LEVELS, REBUILD_ON_UPDATE, dbt_mo
 from jtf.orchestration.definitions import defs
 from jtf.orchestration.ml import (
     BACKTEST,
+    BESIDE_TEPCO,
+    BESIDE_TEPCO_METRICS,
     OUTCOMES,
     PREDICTIONS,
     REPLAY,
@@ -331,10 +333,18 @@ def test_a_replay_and_a_backtest_are_jobs_with_their_assets():
     graph = defs.resolve_asset_graph()
     assert {defs.resolve_job_def(n).name for n in ("replay", "backtest")} == {"replay", "backtest"}
 
-    assert REPLAY.selection.resolve(graph) == {PREDICTIONS, OUTCOMES}
-    assert BACKTEST.selection.resolve(graph) == {
-        PREDICTIONS,
-        OUTCOMES,
-        dg.AssetKey(["ml", "solar_backtest_metrics"]),
-    }
+    # Every run is also set beside TEPCO's forecast, where their days overlap
+    beside_tepco = {BESIDE_TEPCO, BESIDE_TEPCO_METRICS}
+    assert REPLAY.selection.resolve(graph) == {PREDICTIONS, OUTCOMES} | beside_tepco
+    assert (
+        BACKTEST.selection.resolve(graph)
+        == {
+            PREDICTIONS,
+            OUTCOMES,
+            dg.AssetKey(["ml", "solar_backtest_metrics"]),
+        }
+        | beside_tepco
+    )
+    assert graph.get(BESIDE_TEPCO_METRICS).parent_keys == {BESIDE_TEPCO}
+    assert PREDICTIONS in graph.get(BESIDE_TEPCO).parent_keys
     assert REPLAY.config["ops"][solar_predictions.op.name]["config"]["mode"] == "what-if"

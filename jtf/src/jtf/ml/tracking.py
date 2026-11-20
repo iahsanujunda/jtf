@@ -22,7 +22,8 @@ REPO = Path(__file__).resolve().parents[4]
 EXPERIMENT = "solar-backtest"
 TRAININGS = "solar-training"
 # What a backtest is scored by; the last two only for a run with a range
-SCORES = ["mae_share", "bias_share", "mae_mw", "coverage", "pinball_share"]
+SCORES = ["mae_share", "bias_share", "mae_mw", "coverage", "pinball_share", "mae_share_priced"]
+BENCHMARK = "solar-benchmark"
 
 
 def tracking_uri() -> str:
@@ -254,4 +255,44 @@ def log_backtest(
         )
         mlflow.log_text(per_fold.to_csv(index=False), "folds.csv")
         mlflow.log_text(groups.to_csv(index=False), "groups.csv")
+    return logged.info.run_id, mlflow_link(experiment_id, logged.info.run_id)
+
+
+def log_benchmark(
+    *, run: Mapping, per_day: pd.DataFrame, overall: dict[str, float]
+) -> tuple[str, str]:
+    """One MLflow run for a run set beside TEPCO's forecast: each side's miss overall, and the
+    table per target day. The number of days is a metric of its own: a figure over four days is
+    not one over forty. Returns MLflow's run ID and a link to it."""
+    import mlflow
+
+    mlflow.set_tracking_uri(tracking_uri())
+    client = mlflow.MlflowClient()
+    experiment = client.get_experiment_by_name(BENCHMARK)
+    experiment_id = (
+        experiment.experiment_id
+        if experiment
+        else client.create_experiment(BENCHMARK, artifact_location=(REPO / "mlruns").as_uri())
+    )
+    run_id, model = run["run_id"], run["model"]
+    with mlflow.start_run(experiment_id=experiment_id, run_name=f"{model} {run_id[:8]}") as logged:
+        mlflow.set_tags(
+            {
+                "dagster_run_id": run_id,
+                "model": model,
+                "mode": str(run.get("mode", "")),
+                "image_digest": os.environ.get("JTF_IMAGE_DIGEST", ""),
+                **identity(run),
+            }
+        )
+        mlflow.log_params(
+            {
+                "first_target_day": str(per_day["target_day"].min()),
+                "last_target_day": str(per_day["target_day"].max()),
+                "against": "TEPCO's next-day forecast, wind and solar together",
+                "slots_scored": "daylight, with actuals",
+            }
+        )
+        mlflow.log_metrics({name: float(value) for name, value in overall.items()})
+        mlflow.log_text(per_day.to_csv(index=False), "days.csv")
     return logged.info.run_id, mlflow_link(experiment_id, logged.info.run_id)
