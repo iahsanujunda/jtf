@@ -10,7 +10,7 @@ import json
 import subprocess
 import time
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +19,8 @@ REPOSITORY = "__repository__"
 ACTIVE = ["QUEUED", "NOT_STARTED", "STARTING", "STARTED", "CANCELING"]
 # A change to these needs `make setup` and a restart: a reload keeps the installed packages.
 DEPENDENCIES = {"pyproject.toml", "uv.lock", "jtf/pyproject.toml"}
+# The environment the settings name (JTF_ENV): prod's tables are what the project keeps
+PROD = "prod"
 
 
 class Refused(Exception):
@@ -144,16 +146,45 @@ class Git:
         self._git("merge", "--ff-only", "--quiet", new)
 
 
+def may_write(git: Git, env: Mapping[str, str]) -> None:
+    """Prod's tables are written only by code that went through a pull request: from a checkout of
+    main with nothing uncommitted in it (workflow doc). Raises Refused otherwise. Where the
+    settings name another environment, anything may write: that is what dev is for."""
+    if env.get("JTF_ENV") != PROD:
+        return
+    if git.branch() != "main":
+        raise Refused(f"the settings name prod, and {git.repo} is on {git.branch()!r}, not main")
+    if git.dirty():
+        raise Refused(f"the settings name prod, and {git.repo} has uncommitted changes")
+
+
+def write_instance_settings(repo: Path) -> bool:
+    """Dagster's own settings (deploy/dagster/dagster.local.yaml) put where it reads them, in
+    its home. They live in the repository so that they travel with the code; Dagster reads them
+    when it starts. Returns whether the file changed."""
+    wanted = (repo / "deploy" / "dagster" / "dagster.local.yaml").read_text()
+    path = repo / ".dagster" / "dagster.yaml"
+    if path.exists() and path.read_text() == wanted:
+        return False
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(wanted)
+    return True
+
+
 def update(
     git: Git,
     dagster: Dagster,
     *,
+    prepare: Callable[[], None] = lambda: None,
     timeout: float = 900,
     poll: float = 5,
     sleep: Callable[[float], None] = time.sleep,
     echo: Callable[[str], None] = print,
 ) -> str:
-    """Pull `main` into Dagster's checkout and reload, with no run in between. Returns what
+    """Pull `main` into Dagster's checkout and reload, with no run in between. `prepare` runs
+    once the new code is on disk and before anything runs on it: what the new code needs to find
+    in the warehouse, such as a column its SQL reads. If it fails the sensors stay stopped, as
+    after a failed reload: the new SQL must not run before it is put right. Returns what
     changed; raises Refused if nothing was pulled, RuntimeError if the new code failed to load.
     With nothing to pull it still reloads: the checkout may have moved without one (a pull by
     hand), and Dagster can't say which commit it loaded."""
@@ -192,6 +223,7 @@ def update(
             dagster.start(sensor)
         raise
     try:
+        prepare()
         dagster.reload()
     except Exception as e:
         raise RuntimeError(

@@ -5,7 +5,8 @@ version: 2
 # `ods_dataset` at its own empty copy (`jtf ci create`), so it never reads the real ODS.
 sources:
   - name: ods
-    database: "{{ env_var('JTF_BIGQUERY_PROJECT') }}"
+    # A build in dev reads prod's ODS unless it is trying a parser: JTF_ODS_PROJECT names it
+    database: "{{ env_var('JTF_ODS_PROJECT', env_var('JTF_BIGQUERY_PROJECT')) }}"
     schema: "{{ var('ods_dataset', 'ods') }}"
     tables:
       - name: raw_files

@@ -254,3 +254,26 @@ def test_a_run_beside_tepco_is_logged_with_its_days_and_shown_in_dagster(store, 
     assert entry.data.tags["mode"] == "backtest" and entry.data.tags["git_commit"] == "abc123"
     assert entry.data.params["first_target_day"] == "2026-03-01"
     assert files(store, entry.info.run_id) == ["days.csv"]
+
+
+def test_a_new_experiment_keeps_its_files_where_the_settings_say(store, tmp_path, monkeypatch):
+    bucket = (tmp_path / "models-bucket").as_uri()  # in prod: gs://<project>-models/mlflow
+    monkeypatch.setenv("JTF_MLFLOW_ARTIFACTS", bucket)
+    per_fold = pd.DataFrame({"fold": [date(2026, 2, 1)], "mae_share": [0.05]})
+    groups = pd.DataFrame({"grouping": ["sky"], "group": ["clear"], "mae_share": [0.03]})
+
+    logged, _ = tracking.log_backtest(
+        run=RUN,
+        first_month=date(2026, 2, 1),
+        last_month=date(2026, 2, 1),
+        per_fold=per_fold,
+        overall={"mae_share": 0.05},
+        groups=groups,
+        fidelity={"exact": 1, "approximate": 0},
+    )
+
+    entry = store.get_run(logged)
+    assert entry.info.artifact_uri.startswith(bucket)
+    assert (tmp_path / "models-bucket").is_dir() and not (tmp_path / "mlruns").exists()
+    monkeypatch.delenv("JTF_MLFLOW_ARTIFACTS")
+    assert tracking.artifact_root() == (tmp_path / "mlruns").as_uri()

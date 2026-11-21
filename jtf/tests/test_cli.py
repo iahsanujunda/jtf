@@ -72,3 +72,59 @@ def test_replay_needs_a_range_or_a_run_to_reproduce_before_it_touches_bigquery(a
 
     assert result.exit_code != 0
     assert "--from and --to for a what-if, or --reproduce" in said(result)
+
+
+def test_nothing_is_parsed_into_prod_from_a_branch(monkeypatch):
+    """This checkout is on a branch, or has changes, whenever tests run before a merge: with the
+    settings naming prod, `jtf parse` must refuse before it opens a store or a warehouse."""
+    from jtf.orchestration import update
+
+    monkeypatch.setattr(update.Git, "branch", lambda self: "a-branch")
+    monkeypatch.setattr("google.cloud.bigquery.Client", NoClient)
+    args = ["parse", "--source", "tepco_actuals", "--from", "2026-11-15"]
+    env = {"JTF_ENV": "prod", "JTF_RAW_URL": "file:///nowhere", "JTF_BIGQUERY_PROJECT": "p"}
+
+    result = runner.invoke(app, args, env=env)
+
+    assert result.exit_code == 1
+    assert "nothing parsed" in said(result) and "not main" in said(result)
+
+
+def test_dagster_is_not_started_against_prod_with_uncommitted_changes(tmp_path, monkeypatch):
+    from jtf.orchestration import update
+
+    monkeypatch.setattr(update.Git, "branch", lambda self: "main")
+    monkeypatch.setattr(update.Git, "dirty", lambda self: True)
+
+    refused = runner.invoke(
+        app, ["dagster", "ready", "--repo", str(tmp_path)], env={"JTF_ENV": "prod"}
+    )
+
+    assert refused.exit_code == 1 and "Dagster not started" in said(refused)
+    assert not (tmp_path / ".dagster").exists()
+
+    (tmp_path / "deploy" / "dagster").mkdir(parents=True)
+    (tmp_path / "deploy" / "dagster" / "dagster.local.yaml").write_text("retention: {}\n")
+    allowed = runner.invoke(
+        app, ["dagster", "ready", "--repo", str(tmp_path)], env={"JTF_ENV": "dev"}
+    )
+    assert allowed.exit_code == 0 and (tmp_path / ".dagster" / "dagster.yaml").exists()
+
+
+def test_nothing_is_built_in_prod_from_a_branch_or_with_uncommitted_changes(tmp_path, monkeypatch):
+    from jtf.orchestration import update
+
+    guard = ["warehouse", "guard", "--repo", str(tmp_path)]
+    monkeypatch.setattr(update.Git, "branch", lambda self: "a-change")
+    monkeypatch.setattr(update.Git, "dirty", lambda self: False)
+
+    on_a_branch = runner.invoke(app, guard, env={"JTF_ENV": "prod"})
+
+    assert on_a_branch.exit_code == 1
+    assert "nothing built" in said(on_a_branch) and "not main" in said(on_a_branch)
+    assert runner.invoke(app, guard, env={"JTF_ENV": "dev"}).exit_code == 0  # what dev is for
+
+    monkeypatch.setattr(update.Git, "branch", lambda self: "main")
+    assert runner.invoke(app, guard, env={"JTF_ENV": "prod"}).exit_code == 0
+    monkeypatch.setattr(update.Git, "dirty", lambda self: True)
+    assert runner.invoke(app, guard, env={"JTF_ENV": "prod"}).exit_code == 1

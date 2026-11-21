@@ -1,10 +1,9 @@
 # dagster
 
-Prod Dagster deployment on the Compute Engine VM. Local development needs none of this: `dagster dev` runs with local storage and in-process runs.
+Dagster's own settings, kept here so that they travel with the code.
 
-| File (planned) | Holds |
+| File | Holds |
 | --- | --- |
-| `dagster.prod.yaml` | Postgres storage on Cloud SQL, Docker run launcher, connection pool limits for `db-f1-micro`, retention for sensor and schedule ticks |
-| `compose.prod.yaml` | The VM's services: webserver, daemon, code location (the app image by digest), Cloud SQL Auth Proxy |
+| `dagster.local.yaml` | The laptop's instance settings: how long sensor, automation and schedule ticks are kept (skipped ticks one day, the others 30 days). Without it the tick history grows without bound: 2.6 GB in six days. `make dagster` copies it to `.dagster/dagster.yaml` before Dagster starts, since Dagster reads it only then |
 
-The webserver has no login and is never public: it is reached through an IAP tunnel. If Dagster or its database is down, the daily forecast still has the fallback job, which needs neither.
+Dagster in prod is not built in this phase: it runs on one laptop, which need not be on all the time ([workflow](../../docs/workflow.md#where-you-work)). No machine that has to be patched by hand will hold it; the starting point for the next phase is the daemon as a Cloud Run job per capture window.

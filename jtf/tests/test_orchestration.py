@@ -1,5 +1,6 @@
 import json
 from collections import Counter
+from datetime import UTC, datetime
 
 import dagster as dg
 
@@ -19,10 +20,12 @@ from jtf.orchestration.ml import (
     solar_predictions,
 )
 from jtf.orchestration.ods import (
+    CATCH_UP,
     FILE_CHECKS,
     MANIFEST_KEY,
     MANIFEST_SPEC,
     ODS_ASSETS,
+    PARSE_WHEN_LANDED,
     ROWS_AS_LOADED,
     ods_key,
 )
@@ -348,3 +351,42 @@ def test_a_replay_and_a_backtest_are_jobs_with_their_assets():
     assert graph.get(BESIDE_TEPCO_METRICS).parent_keys == {BESIDE_TEPCO}
     assert PREDICTIONS in graph.get(BESIDE_TEPCO).parent_keys
     assert REPLAY.config["ops"][solar_predictions.op.name]["config"]["mode"] == "what-if"
+
+
+def test_every_parse_asset_catches_up_on_the_days_missed_while_dagster_was_off():
+    conditions = {
+        asset.key: asset.automation_conditions_by_key.get(asset.key) for asset in ODS_ASSETS
+    }
+    assert conditions and set(conditions.values()) == {PARSE_WHEN_LANDED}
+
+
+def test_days_whose_files_landed_while_dagster_was_off_are_all_parsed_once_it_is_back():
+    days = dg.DailyPartitionsDefinition(start_date="2026-01-01", timezone="Asia/Tokyo")
+    raw = dg.AssetSpec(dg.AssetKey(["raw", "source"]), partitions_def=days)
+
+    @dg.asset(
+        key=dg.AssetKey(["ods", "table"]),
+        deps=[raw.key],
+        partitions_def=days,
+        automation_condition=PARSE_WHEN_LANDED,
+    )
+    def table(): ...
+
+    defs = dg.Definitions(assets=[raw, table])
+    instance = dg.DagsterInstance.ephemeral()
+    now = datetime(2026, 3, 20, 10, 0, tzinfo=UTC)
+    first = dg.evaluate_automation_conditions(defs, instance, evaluation_time=now)
+    assert first.total_requested == 0
+
+    # Dagster comes back after four days: the sensor records every day's files in one tick. A
+    # file that turned up for a day ten weeks old is recorded too, and is beyond the catch-up.
+    landed = ["2026-03-16", "2026-03-17", "2026-03-18", "2026-03-19", "2026-01-05"]
+    for day in landed:
+        instance.report_runless_asset_event(dg.AssetMaterialization(raw.key, partition=day))
+    back = dg.evaluate_automation_conditions(
+        defs, instance, cursor=first.cursor, evaluation_time=now
+    )
+
+    asked = back.get_requested_partitions(table.key)
+    assert asked == set(landed[:4])
+    assert CATCH_UP.days >= 28  # a few times a week, with room for a month away

@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from jtf.orchestration.update import Dagster, Refused, Sensor, update
+from jtf.orchestration.update import (
+    Dagster,
+    Refused,
+    Sensor,
+    may_write,
+    update,
+    write_instance_settings,
+)
 
 OLD, NEW = "a" * 40, "b" * 40
 SENSORS = [Sensor("automation", "s1"), Sensor("raw_bucket_sensor", "s2")]
@@ -180,3 +187,73 @@ def test_the_api_calls_reach_dagster_as_graphql():
     assert "STARTED" in sent[-1][1]["statuses"] and "QUEUED" in sent[-1][1]["statuses"]
     with pytest.raises(RuntimeError, match="boom"):
         dagster.reload()
+
+
+def test_what_new_code_needs_is_prepared_after_the_pull_and_before_the_reload():
+    log = []
+    run(FakeGit(log), FakeDagster(log), prepare=lambda: log.append(("prepare",)))
+
+    done = [step[0] for step in log]
+    assert done.index("pull") < done.index("prepare") < done.index("reload")
+    assert done.index("reload") < done.index("start")
+
+
+def test_a_failed_preparation_keeps_the_sensors_stopped_and_nothing_reloads():
+    log = []
+
+    def no_column():
+        raise RuntimeError("the table could not be extended")
+
+    with pytest.raises(RuntimeError, match="sensors stay stopped"):
+        run(FakeGit(log), FakeDagster(log), prepare=no_column)
+
+    done = [step[0] for step in log]
+    assert "pull" in done and "reload" not in done and "start" not in done
+
+
+@pytest.mark.parametrize(
+    "settings, branch, dirty, refused",
+    [
+        ({"JTF_ENV": "prod"}, "main", False, None),
+        ({"JTF_ENV": "prod"}, "a-branch", False, "not main"),
+        ({"JTF_ENV": "prod"}, "main", True, "uncommitted"),
+        ({"JTF_ENV": "dev"}, "a-branch", True, None),
+        ({}, "a-branch", True, None),
+    ],
+    ids=["prod on clean main", "prod on a branch", "prod with changes", "dev", "unset is dev"],
+)
+def test_prod_is_written_only_from_a_clean_checkout_of_main(settings, branch, dirty, refused):
+    git = FakeGit([], branch=branch, dirty=dirty)
+    if refused is None:
+        may_write(git, settings)
+    else:
+        with pytest.raises(Refused, match=refused):
+            may_write(git, settings)
+
+
+def test_dagsters_own_settings_are_written_from_the_repository_once(tmp_path):
+    wanted = "retention:\n  sensor:\n    purge_after_days: 1\n"
+    (tmp_path / "deploy" / "dagster").mkdir(parents=True)
+    (tmp_path / "deploy" / "dagster" / "dagster.local.yaml").write_text(wanted)
+
+    assert write_instance_settings(tmp_path) is True
+    assert (tmp_path / ".dagster" / "dagster.yaml").read_text() == wanted
+    assert write_instance_settings(tmp_path) is False  # as it is: nothing to write
+    (tmp_path / ".dagster" / "dagster.yaml").write_text("edited by hand")
+    assert write_instance_settings(tmp_path) is True
+    assert (tmp_path / ".dagster" / "dagster.yaml").read_text() == wanted
+
+
+def test_the_settings_in_the_repository_are_ones_dagster_accepts(tmp_path):
+    import dagster as dg
+    from dagster._core.definitions.run_request import InstigatorType
+
+    repo = Path(__file__).resolve().parents[2]
+    (tmp_path / "deploy" / "dagster").mkdir(parents=True)
+    source = repo / "deploy" / "dagster" / "dagster.local.yaml"
+    (tmp_path / "deploy" / "dagster" / "dagster.local.yaml").write_text(source.read_text())
+    write_instance_settings(tmp_path)
+
+    with dg.DagsterInstance.from_config(str(tmp_path / ".dagster")) as instance:
+        kept = instance.get_tick_retention_settings(InstigatorType.SENSOR)
+    assert {status.value: days for status, days in kept.items()}["SKIPPED"] == 1

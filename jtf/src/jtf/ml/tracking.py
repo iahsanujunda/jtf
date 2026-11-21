@@ -30,6 +30,12 @@ def tracking_uri() -> str:
     return os.environ.get("MLFLOW_TRACKING_URI") or f"sqlite:///{REPO / 'mlflow.db'}"
 
 
+def artifact_root() -> str:
+    """Where a new experiment keeps its runs' files: the bucket JTF_MLFLOW_ARTIFACTS names, as
+    in prod, else `mlruns/` beside the code. An experiment keeps the place it was made with."""
+    return os.environ.get("JTF_MLFLOW_ARTIFACTS") or (REPO / "mlruns").as_uri()
+
+
 # Where the two UIs are, for the links between a run in one and its entry in the other
 DAGSTER_URL, MLFLOW_URL = "http://localhost:3000", "http://localhost:5000"
 FINGERPRINTS = ["inputs_fingerprint", "training_fingerprint", "outputs_fingerprint"]
@@ -137,7 +143,7 @@ def log_trainings(*, run: Mapping, trainings: list[dict], rows: pd.DataFrame) ->
     experiment_id = (
         experiment.experiment_id
         if experiment
-        else client.create_experiment(TRAININGS, artifact_location=(REPO / "mlruns").as_uri())
+        else client.create_experiment(TRAININGS, artifact_location=artifact_root())
     )
     run_id, model = run["run_id"], run["model"]
     table = pd.DataFrame(trainings).drop(columns="file")
@@ -218,7 +224,7 @@ def log_backtest(
     experiment_id = (
         experiment.experiment_id
         if experiment
-        else client.create_experiment(EXPERIMENT, artifact_location=(REPO / "mlruns").as_uri())
+        else client.create_experiment(EXPERIMENT, artifact_location=artifact_root())
     )
     run_id, model = run["run_id"], run["model"]
     with mlflow.start_run(experiment_id=experiment_id, run_name=f"{model} {run_id[:8]}") as logged:
@@ -272,7 +278,7 @@ def log_benchmark(
     experiment_id = (
         experiment.experiment_id
         if experiment
-        else client.create_experiment(BENCHMARK, artifact_location=(REPO / "mlruns").as_uri())
+        else client.create_experiment(BENCHMARK, artifact_location=artifact_root())
     )
     run_id, model = run["run_id"], run["model"]
     with mlflow.start_run(experiment_id=experiment_id, run_name=f"{model} {run_id[:8]}") as logged:

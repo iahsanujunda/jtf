@@ -6,6 +6,8 @@ from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 import pytest
+from google.api_core.exceptions import NotFound
+from google.cloud import bigquery
 
 from jtf.ml.backtest import (
     BOOSTED,
@@ -28,7 +30,13 @@ from jtf.ml.replay import (
     run,
     training_cutoff,
 )
-from jtf.ml.warehouse import KEY_COLUMNS, OUTPUT_COLUMNS
+from jtf.ml.warehouse import (
+    KEY_COLUMNS,
+    OUTPUT_COLUMNS,
+    PREDICTION_SCHEMA,
+    RUN_SCHEMA,
+    ensure_tables,
+)
 from test_boosted import world as lit_world
 
 CODE = {"git_commit": "abc123", "git_dirty": "false", "image_digest": ""}
@@ -411,3 +419,64 @@ def test_a_model_with_no_fallback_refuses_a_day_without_its_weather(monkeypatch)
     with pytest.raises(Refused, match="no fallback"):
         a_run(warehouse, "r1", model=BOOSTED, fault="F1", **MARCH)
     assert not warehouse.predictions and not warehouse.runs
+
+
+class FakeBigQueryClient:
+    """The few calls ensure_tables makes, over tables kept as their column names and modes."""
+
+    def __init__(self, tables: dict | None = None):
+        self.tables, self.datasets, self.calls = dict(tables or {}), [], []
+
+    def create_dataset(self, dataset, exists_ok):
+        self.datasets.append((dataset.dataset_id, dataset.location, exists_ok))
+
+    def get_table(self, reference):
+        if reference not in self.tables:
+            raise NotFound(reference)
+        return self.tables[reference]
+
+    def create_table(self, table):
+        self.calls.append(("create", table.table_id, table.clustering_fields))
+        self.tables[f"{table.project}.{table.dataset_id}.{table.table_id}"] = table
+
+    def update_table(self, table, fields):
+        self.calls.append(("update", table.table_id, fields))
+
+
+def test_the_tables_python_writes_are_made_as_the_code_has_them():
+    client = FakeBigQueryClient()
+
+    done = ensure_tables(client, "p", "asia-northeast1", "prod")
+
+    assert client.datasets == [("prod_ads", "asia-northeast1", True)]
+    assert client.calls == [
+        ("create", "ads_ml_prediction_solar", ["run_id"]),
+        ("create", "ads_ml_runs", None),
+    ]
+    made = client.tables["p.prod_ads.ads_ml_prediction_solar"]
+    assert [f.name for f in made.schema] == [f.name for f in PREDICTION_SCHEMA]
+    assert done == ["ads_ml_prediction_solar: created", "ads_ml_runs: created"]
+    assert ensure_tables(client, "p", "asia-northeast1", "prod") == []  # as the code has them
+
+
+def test_a_table_made_before_a_column_existed_gains_it_nullable_and_keeps_the_rest():
+    older = bigquery.Table(
+        "p.prod_ads.ads_ml_prediction_solar",
+        schema=[f for f in PREDICTION_SCHEMA if f.name not in ("level", "fold")],
+    )
+    runs = bigquery.Table("p.prod_ads.ads_ml_runs", schema=RUN_SCHEMA)
+    tables = {"p.prod_ads.ads_ml_prediction_solar": older, "p.prod_ads.ads_ml_runs": runs}
+    client = FakeBigQueryClient(tables)
+
+    done = ensure_tables(client, "p", "asia-northeast1", "prod")
+
+    assert done == ["ads_ml_prediction_solar: added fold, level"]
+    assert client.calls == [("update", "ads_ml_prediction_solar", ["schema"])]
+    names = [f.name for f in older.schema]
+    assert names[:-2] == [f.name for f in PREDICTION_SCHEMA if f.name not in ("level", "fold")]
+    # `fold` is required of a new row, but the rows already there have none: added nullable
+    assert {f.name: f.mode for f in PREDICTION_SCHEMA}["fold"] == "REQUIRED"
+    assert [(f.name, f.mode) for f in older.schema[-2:]] == [
+        ("fold", "NULLABLE"),
+        ("level", "NULLABLE"),
+    ]

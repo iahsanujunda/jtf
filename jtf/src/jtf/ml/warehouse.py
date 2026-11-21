@@ -67,6 +67,37 @@ RUN_SCHEMA = [
 ]
 
 
+def ensure_tables(client: bigquery.Client, project: str, location: str, prefix: str) -> list[str]:
+    """Make the two tables Python writes as their schemas here have them, or add to them the
+    columns they lack, and say what was done. dbt reads these tables: a model that reads a new
+    column must find it before a run has appended a row with it, so this runs whenever new code
+    arrives (`jtf dagster update`, `make dagster`) and no column is ever added by hand. A column
+    added to a table that has rows can't be required of them: it is added nullable."""
+    dataset = bigquery.Dataset(f"{project}.{prefix}_ads")
+    dataset.location = location
+    client.create_dataset(dataset, exists_ok=True)
+    wanted = {PREDICTIONS: (PREDICTION_SCHEMA, ["run_id"]), RUNS: (RUN_SCHEMA, None)}
+    done = []
+    for name, (schema, clustering) in wanted.items():
+        reference = f"{project}.{prefix}_ads.{name}"
+        try:
+            table = client.get_table(reference)
+        except NotFound:
+            table = bigquery.Table(reference, schema=schema)
+            table.clustering_fields = clustering
+            client.create_table(table)
+            done.append(f"{name}: created")
+            continue
+        held = {field.name for field in table.schema}
+        missing = [field for field in schema if field.name not in held]
+        if missing:
+            added = [bigquery.SchemaField(f.name, f.field_type, mode="NULLABLE") for f in missing]
+            table.schema = [*table.schema, *added]
+            client.update_table(table, ["schema"])
+            done.append(f"{name}: added {', '.join(f.name for f in missing)}")
+    return done
+
+
 def fingerprint_of(columns: list[str]) -> str:
     """The ODS check's fingerprint, over the named columns of each row of `t`."""
     row = ROW_JSON.replace("TO_JSON(t)", f"TO_JSON(STRUCT({', '.join(f't.{c}' for c in columns)}))")
